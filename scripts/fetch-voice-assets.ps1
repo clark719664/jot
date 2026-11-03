@@ -18,7 +18,7 @@ function Get-PinnedAsset($FileName, $Release, $AssetName, $AssetId, $ExpectedHas
     if ($UseGhApi) {
         gh api "repos/k2-fsa/sherpa-onnx/releases/assets/$AssetId" -H 'Accept: application/octet-stream' > $download
     } else {
-        curl.exe -fL --retry 2 -o $download "https://github.com/k2-fsa/sherpa-onnx/releases/download/$Release/$AssetName"
+        curl -fL --retry 2 -o $download "https://github.com/k2-fsa/sherpa-onnx/releases/download/$Release/$AssetName"
     }
     if ($LASTEXITCODE -ne 0) { throw "Download failed for $AssetName" }
     if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -ne $ExpectedHash) {
@@ -31,7 +31,7 @@ function Get-PinnedAsset($FileName, $Release, $AssetName, $AssetId, $ExpectedHas
 function Install-Model($Archive, $ArchiveRoot, $Suffix, $Destination) {
     $roles = 'encoder', 'decoder', 'joiner'
     $entries = @($roles | ForEach-Object { "$ArchiveRoot/$_$Suffix" }) + "$ArchiveRoot/tokens.txt"
-    tar.exe -xf $Archive -C $staging @entries
+    tar -xf $Archive -C $staging @entries
     if ($LASTEXITCODE -ne 0) { throw "Extracting $ArchiveRoot failed" }
 
     New-Item -ItemType Directory -Force $Destination | Out-Null

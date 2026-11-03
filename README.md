@@ -1,40 +1,56 @@
 # Jot
 
-Native Android voice notes for Samsung Galaxy A36. Say **Hey Jot**, dictate, confirm, then choose an alarm, calendar event, reminder, or message draft. Voice recognition is local. The app has no Internet permission, account, ads, subscription, or automatic message sending.
+Voice notes that become alarms, events, reminders and messages.
+
+**[Download Jot.apk](https://github.com/clark719664/jot/releases/latest/download/Jot.apk)** · [clark719664.github.io/jot](https://clark719664.github.io/jot/)
+
+Say **Hey Jot**, dictate, confirm. Jot offers what fits: an alarm, a calendar event, a reminder or a message draft. Ask about your notes and it answers.
 
 ## Install
 
-Transfer `Jot-0.1.0.apk` to the phone and open it in My Files. Follow Android's installation prompt. Open Jot and allow microphone access when using voice. Allow notifications for hands-free listening and reminders. Turn on **Hey Jot** to start listening; the ongoing notification has **Stop**. Precisely timed reminders ask for Android's Alarms and reminders special access; approximate timing is available explicitly.
+Android 8 or newer. Open `Jot.apk` on the phone and allow the install. Newer versions install over the old one and keep your notes.
 
-Notes remain on the phone. This release disables cloud backup and device transfer; uninstalling deletes its notes. Keep the app installed when updating with a newer APK signed by the same key.
+Allow the microphone for voice and notifications for **Hey Jot** and reminders. Precise reminders ask for Alarms and reminders access; approximate timing works without it.
 
-## Behavior
+## Companion
 
-- The pen creates a typed note; microphone starts a voice note immediately.
-- Confirming preserves the note before any other action. Each selected action is stored independently.
-- Messages are editable drafts. Open Messages to select a recipient and send yourself.
-- Clock and Calendar open Android's own screens. Their rows report that the app opened, not that an item was created.
-- When locked, external actions remain pending. Tap the notification and unlock to continue.
-- Stopping or rebooting leaves Hey Jot off until you enable it again.
-- Spoken readback requires an installed offline English Android text-to-speech voice.
+Tap ✦ to download the companion: [Gemma 4 E2B](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm), 2.6 GB over Wi-Fi, running on the phone with [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM). With it, Jot:
+
+- picks the actions a note asks for,
+- titles events and reminders, and drafts messages for you to send,
+- answers questions about your notes: *"Hey Jot, what's the wifi password?"*
+
+Without it, Jot still suggests actions from plain cues such as "remind me" or "wake me". Tap ✦ again to remove it. How it works: [docs/companion.md](docs/companion.md).
+
+## Privacy
+
+Notes, audio and the companion stay on the phone. The only network request is the companion download from Hugging Face, checked against a pinned SHA-256. No accounts, ads or analytics, and no cloud backup: uninstalling deletes your notes.
+
+Messages are drafts. You pick the recipient and send them yourself. Clock and Calendar open Android's own screens.
 
 ## Build
 
-Use JDK 21, Android SDK platform/build tools 35, and the checked-in Gradle 8.9 wrapper. Output bytecode targets Java 17; the app supports Android 8 and newer and targets Android 15.
+JDK 21 and Android SDK 35. Restore the speech runtime and models (hashes and licenses in [docs/voice-assets.md](docs/voice-assets.md)), then build:
 
-Set `JAVA_HOME` to the JDK and put the Android SDK path in an ignored `local.properties`. Restore the pinned speech runtime and model assets with `scripts/fetch-voice-assets.ps1`; see the provenance document in `docs` for hashes and licenses.
-
-```powershell
-./gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
-./gradlew.bat :app:assembleRelease
+```sh
+pwsh scripts/fetch-voice-assets.ps1
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-The personal release signing key and properties are in ignored `.local/`. Keep that directory private and backed up: it is needed to update the installed app without removing its notes. It is never included in the APK or source commits.
+Release builds are signed when `.local/signing.properties` exists; keep that key, since updates must use it.
 
-Android instrumentation tests use the bundled production speech models, confirm draft recovery through Room, and exercise dismissal during reminder saving. Test waveforms are in `app/src/androidTest/assets` and are excluded from the release APK.
+## Test
 
-## Verification boundary
+`testDebugUnitTest` covers parsing, time handling and the companion's rules on the JVM. Device tests run the bundled speech models, draft recovery, reminder saving and, when the companion model is on the device, the companion itself:
 
-This first release is verified on an Android 36 emulator and recorded speech fixtures. It still needs real Galaxy A36 testing for microphone acoustics, wake sensitivity, Samsung background behavior, TalkBack, and battery consumption. The emulator's Calendar provider has a missing activity class, so Calendar completion must be checked on the phone. Jot preserves the handoff and subsequent pending actions when that provider fails.
+```sh
+./gradlew :app:connectedDebugAndroidTest
+```
 
-The older pinned Android lint tool misclassifies `SCHEDULE_EXACT_ALARM` as system-only. Only that diagnostic is suppressed on that permission: it is the documented user-granted special access, checked with `canScheduleExactAlarms()` before use. See https://developer.android.com/develop/background-work/services/alarms . Other lint checks remain enabled.
+## Limits
+
+Verified on an Android 16 emulator with recorded speech. Microphone acoustics, wake sensitivity, background limits, battery use and GPU speed still need real phones. Spoken readback needs an offline English text-to-speech voice.
+
+## License
+
+MIT. Third-party components and models keep their own licenses, listed in [docs](docs).

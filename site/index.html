@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jot</title>
+<meta name="description" content="Voice notes that become alarms, events, reminders and messages.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111315" media="(prefers-color-scheme: dark)">
+<meta property="og:title" content="Jot">
+<meta property="og:description" content="Voice notes that become alarms, events, reminders and messages.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800&display=swap">
+<style>
+  :root {
+    --bg: #ffffff;
+    --ink: #1d2026;
+    --muted: #666b76;
+    --accent: #315dc0;
+    --on-accent: #ffffff;
+    --line: #e6e8ec;
+    --tint: #f3f5f8;
+    --gutter: clamp(1rem, 5vw, 2.5rem);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111315;
+      --ink: #f0f1f4;
+      --muted: #a4aab6;
+      --accent: #adc4ff;
+      --on-accent: #122348;
+      --line: #30343b;
+      --tint: #20242a;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html { background: var(--bg); }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 1.125rem/1.5 Figtree, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main, footer { max-width: 72rem; margin: 0 auto; padding-inline: var(--gutter); }
+  main { padding-top: clamp(3rem, 12vh, 8rem); }
+
+  h1 {
+    font-weight: 800;
+    font-size: clamp(6.5rem, 26vw, 17rem);
+    line-height: 0.8;
+    letter-spacing: -0.07em;
+    margin-left: -0.06em;
+  }
+  .purpose {
+    max-width: 21ch;
+    margin-top: clamp(1.25rem, 3vw, 2rem);
+    font-size: clamp(1.5rem, 3.4vw, 2.25rem);
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+  .purpose span { animation: heard 0.32s ease-out both; animation-delay: calc(var(--i) * 85ms + 150ms); }
+  @keyframes heard { from { opacity: 0; filter: blur(6px); } }
+
+  .download {
+    display: inline-flex;
+    align-items: center;
+    min-height: 3.25rem;
+    margin-top: 2rem;
+    padding: 0 1.6rem;
+    border-radius: 15px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .download:hover { filter: brightness(1.08); }
+  a:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 15px; }
+
+  .screens {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(14rem, 1fr);
+    gap: clamp(0.75rem, 2vw, 1.5rem);
+    margin: clamp(3.5rem, 9vh, 6rem) calc(var(--gutter) * -1) 0;
+    padding: 0 var(--gutter) 0.75rem;
+    list-style: none;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: var(--gutter);
+    scrollbar-width: none;
+  }
+  .screens::-webkit-scrollbar { display: none; }
+  .screens li { scroll-snap-align: start; }
+  .screens img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--line);
+    border-radius: 1.75rem;
+    background: var(--tint);
+  }
+
+  .privacy { max-width: 34ch; margin-top: clamp(3rem, 8vh, 5rem); color: var(--muted); }
+  footer { padding-top: 1.5rem; padding-bottom: 3rem; }
+  footer a { color: var(--muted); text-underline-offset: 0.2em; }
+  footer a:hover { color: var(--ink); }
+
+  @media (prefers-reduced-motion: reduce) { .purpose span { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Jot</h1>
+  <p class="purpose"><span style="--i:0">Voice</span> <span style="--i:1">notes</span> <span style="--i:2">that</span> <span style="--i:3">become</span> <span style="--i:4">alarms,</span> <span style="--i:5">events,</span> <span style="--i:6">reminders</span> <span style="--i:7">and</span> <span style="--i:8">messages.</span></p>
+  <a class="download" href="https://github.com/clark719664/jot/releases/latest/download/Jot.apk">Download for Android</a>
+
+  <ul class="screens">
+    <li><picture><source srcset="screens/notes-dark.webp" media="(prefers-color-scheme: dark)"><img src="screens/notes.webp" width="720" height="1437" alt="Notes list with the companion, search and write buttons"></picture></li>
+    <li><picture><source srcset="screens/actions-dark.webp" media="(prefers-color-scheme: dark)"><img src="screens/actions.webp" width="720" height="1437" alt="Calendar and Message already checked for a dinner note" loading="lazy"></picture></li>
+    <li><picture><source srcset="screens/message-dark.webp" media="(prefers-color-scheme: dark)"><img src="screens/message.webp" width="720" height="1437" alt="A drafted message: Hey Sam, I'm running ten minutes late." loading="lazy"></picture></li>
+    <li><picture><source srcset="screens/answer-dark.webp" media="(prefers-color-scheme: dark)"><img src="screens/answer.webp" width="720" height="1437" alt="Answer to what's the wifi password: maple 42" loading="lazy"></picture></li>
+  </ul>
+
+  <p class="privacy">Notes, voice and the companion stay on your phone.</p>
+</main>
+<footer><a href="https://github.com/clark719664/jot">GitHub</a></footer>
+</body>
+</html>
