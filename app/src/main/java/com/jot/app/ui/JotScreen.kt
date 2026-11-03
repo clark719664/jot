@@ -237,7 +237,7 @@ private fun NotesHome(
                 modifier = Modifier.size(48.dp),
                 enabled = !state.busy,
             ) {
-                Icon(Icons.Outlined.EditNote, "Write a note")
+                Icon(Icons.Outlined.EditNote, "Write to Jot")
             }
         }
         if (searching) {
@@ -314,7 +314,7 @@ private fun NoteRow(item: NoteItem, enabled: Boolean, onClick: () -> Unit) {
             maxLines = 4,
             overflow = TextOverflow.Ellipsis,
         )
-        item.actions.filter { it.status == ActionStatus.PENDING || it.status == ActionStatus.SCHEDULED }
+        item.actions.filter { it.status == ActionStatus.PENDING || it.status == ActionStatus.SCHEDULED || it.status == ActionStatus.DONE }
             .forEach { action ->
                 Text(
                     actionSummary(action),
@@ -585,13 +585,25 @@ private fun ActionChoices(state: JotUiState, callbacks: JotCallbacks) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Checkbox(checked = checked, onCheckedChange = null, enabled = !state.busy)
-                Text(kind.label, style = MaterialTheme.typography.bodyLarge)
+                Column(Modifier.weight(1f)) {
+                    Text(kind.label, style = MaterialTheme.typography.bodyLarge)
+                    val detail = state.plan[kind]?.takeIf { checked }?.let { formSummary(it) }
+                    if (detail != null) {
+                        Text(
+                            detail,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
             if (kind != ActionKind.entries.last()) HorizontalDivider()
         }
     }
     PrimaryAction(
-        if (state.selected.isEmpty()) "Done" else "Continue",
+        if (state.selected.isEmpty()) "Done" else "Confirm",
         enabled = !state.busy,
         modifier = Modifier.fillMaxWidth(),
         onClick = callbacks.onContinue,

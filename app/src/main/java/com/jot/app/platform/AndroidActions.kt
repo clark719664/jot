@@ -9,6 +9,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -114,7 +115,31 @@ class AndroidActions(context: Context, private val store: JotStore = JotStore.ge
         return ScheduleResult.Scheduled(exact)
     }
 
-    fun dispatch(activity: Activity, note: NoteRecord, action: ActionRecord): Result<Unit> {
+    /** Adds the event straight to the primary writable calendar; false when that is not possible. */
+    fun addEvent(note: NoteRecord, action: ActionRecord): Boolean {
+        val granted = listOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
+            .all { app.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+        if (!granted || action.kind != ActionKind.CALENDAR || note.draft) return false
+        return runCatching {
+            val start = futureStart(action)
+            val end = action.endMillis?.takeIf { it > start } ?: Math.addExact(start, 30 * 60_000L)
+            val calendars = CalendarContract.Calendars.CONTENT_URI
+            val writable = "${CalendarContract.Calendars.VISIBLE} = 1 AND ${CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL} >= ${CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR}"
+            val order = "${CalendarContract.Calendars.IS_PRIMARY} DESC, ${CalendarContract.Calendars._ID} ASC"
+            val calendar = app.contentResolver.query(calendars, arrayOf(CalendarContract.Calendars._ID), writable, null, order)
+                ?.use { if (it.moveToFirst()) it.getLong(0) else null } ?: return false
+            val values = ContentValues().apply {
+                put(CalendarContract.Events.CALENDAR_ID, calendar)
+                put(CalendarContract.Events.TITLE, action.body?.takeIf { it.isNotBlank() } ?: note.text)
+                put(CalendarContract.Events.DTSTART, start)
+                put(CalendarContract.Events.DTEND, end)
+                put(CalendarContract.Events.EVENT_TIMEZONE, ZoneId.systemDefault().id)
+            }
+            app.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values) != null
+        }.getOrDefault(false)
+    }
+
+    fun dispatch(activity: Activity, note: NoteRecord, action: ActionRecord): Result<ActionStatus> {
         return runCatching {
             require(action.noteId == note.id && !note.draft) { "Save the note before opening another app." }
             val text = action.body?.takeIf { it.isNotBlank() } ?: note.text
@@ -136,13 +161,14 @@ class AndroidActions(context: Context, private val store: JotStore = JotStore.ge
             } catch (_: SecurityException) {
                 error("Android could not open the selected app.")
             }
+            if (action.kind == ActionKind.ALARM) ActionStatus.DONE else ActionStatus.HANDED_OFF
         }
     }
 
     suspend fun cancel(action: ActionRecord): Unit = reminderLock.withLock {
         withContext(NonCancellable) {
             val saved = store.action(action.id) ?: return@withContext
-            if (saved.status == ActionStatus.HANDED_OFF || saved.status == ActionStatus.CANCELLED) {
+            if (saved.status == ActionStatus.HANDED_OFF || saved.status == ActionStatus.DONE || saved.status == ActionStatus.CANCELLED) {
                 return@withContext
             }
             store.saveAction(saved.copy(status = ActionStatus.CANCELLED))
@@ -214,7 +240,7 @@ class AndroidActions(context: Context, private val store: JotStore = JotStore.ge
             .putExtra(AlarmClock.EXTRA_HOUR, time.hour)
             .putExtra(AlarmClock.EXTRA_MINUTES, time.minute)
             .putExtra(AlarmClock.EXTRA_MESSAGE, text)
-            .putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
     }
 
     private fun calendarIntent(action: ActionRecord, text: String): Intent {

@@ -35,6 +35,7 @@ class VoiceService : Service() {
     private val audioDispatcher = executor.asCoroutineDispatcher()
     private lateinit var audio: OfflineAudio
     private lateinit var speech: OfflineSpeech
+    private lateinit var voice: NaturalVoice
     private var operation: Job? = null
     private var wakeEnabled = false
     private var wakeRequested = false
@@ -48,6 +49,7 @@ class VoiceService : Service() {
         super.onCreate()
         audio = OfflineAudio(assets)
         speech = OfflineSpeech(this)
+        voice = NaturalVoice(this, scope)
         active = this
     }
 
@@ -88,7 +90,8 @@ class VoiceService : Service() {
                     RESUME_WAKE -> restoreWake()
                     SPEAK, SPEAK_LISTEN -> {
                         publish(speaking = true)
-                        val spoken = speech.speak(text.orEmpty().take(TextToSpeech.getMaxSpeechInputLength()))
+                        val line = text.orEmpty()
+                        val spoken = voice.speak(line) || speech.speak(line.take(TextToSpeech.getMaxSpeechInputLength()))
                         if (!spoken) report("No offline English speech voice is available, or playback was interrupted.")
                         if (spoken && command == SPEAK_LISTEN) capture() else restoreWake()
                     }
@@ -128,6 +131,7 @@ class VoiceService : Service() {
     }
 
     private suspend fun capture() {
+        voice.warm()
         collectUtterance()
         restoreWake()
     }
@@ -198,6 +202,7 @@ class VoiceService : Service() {
         val supervisor = scope.coroutineContext[Job]
         scope.cancel()
         speech.close()
+        voice.close()
         releaseWakeLock()
         CoroutineScope(Dispatchers.Main.immediate).launch {
             try {

@@ -17,7 +17,7 @@ import com.jot.app.ui.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.time.*
-import java.time.format.DateTimeFormatter
+import java.lang.ref.WeakReference
 import java.util.UUID
 
 private const val VOICE_WAIT_MS = 10_000L
@@ -36,9 +36,18 @@ class JotController(private val context: Context) {
     private var changingMessage = false
     val companion = CompanionModel(context, scope)
     private var reading: Deferred<Reading>? = null
-    private var readingText: String? = null
+    private val readingKeys = mutableSetOf<String>()
+    private var readingGeneration = 0
     private var settled: Reading? = null
     private var touched = false
+    private var auto = false
+    private var fresh = false
+    private val done = mutableListOf<String>()
+    private var foreground: WeakReference<Activity>? = null
+
+    fun attach(activity: Activity) { foreground = WeakReference(activity) }
+    fun detach(activity: Activity) { if (foreground?.get() === activity) foreground = null }
+    private fun host(activity: Activity?) = (activity ?: foreground?.get())?.takeIf { !it.isFinishing && !it.isDestroyed }
 
     init {
         scope.launch { VoiceSignals.events.collect { event ->
@@ -96,30 +105,47 @@ class JotController(private val context: Context) {
             val text = before.text.trim()
             if (text.isEmpty()) { update { copy(error = "Enter a note.", busy = false) }; return@launch }
             draftJob?.cancelAndJoin()
+            if (note.draft && !before.voiceSession && companion.state.value == CompanionState.Ready && CompanionText.asks(text)) {
+                update { copy(thinking = true) }
+                val result = read(text).await()
+                if (state.value.note?.id != note.id || state.value.stage != Stage.NOTE) return@launch
+                if (result.question) { answer(text); return@launch }
+                update { copy(thinking = false) }
+            }
             val saved = note.copy(text = text, updatedAt = System.currentTimeMillis(), draft = false)
             store.saveNote(saved)
             if (!note.draft) { finish("Saved"); return@launch }
+            fresh = true
             update { copy(note = saved, text = text, stage = Stage.ACTIONS, selected = emptySet(), busy = false, error = null, thinking = true) }
             suggest(saved, before.voiceSession)
         }
     }
 
-    private fun read(text: String): Deferred<Reading> {
+    private fun read(text: String, spoken: Boolean = false): Deferred<Reading> {
         val clean = text.trim()
-        reading?.takeIf { readingText == clean }?.let { return it }
-        reading?.cancel(); settled = null; readingText = clean
-        return scope.async { CompanionText.settle(clean, companion.read(clean)).also { if (readingText == clean) settled = it } }.also { reading = it }
+        reading?.takeIf { clean in readingKeys }?.let { return it }
+        reading?.cancel(); settled = null; readingKeys.clear(); readingKeys += clean
+        val generation = ++readingGeneration
+        return scope.async {
+            val model = companion.read(clean)
+            val note = if (spoken) CompanionText.fix(clean, model?.note) else clean
+            CompanionText.settle(note, model).copy(note = note).also {
+                if (generation == readingGeneration) { readingKeys += note; settled = it }
+            }
+        }.also { reading = it }
     }
 
-    private fun forget() { reading?.cancel(); reading = null; readingText = null; settled = null; touched = false }
+    private fun forget() { reading?.cancel(); reading = null; readingKeys.clear(); readingGeneration++; settled = null; touched = false }
 
     private suspend fun suggest(note: NoteRecord, voice: Boolean) {
         touched = false
         val pending = read(note.text)
         val result = if (voice) withTimeoutOrNull(VOICE_WAIT_MS) { pending.await() } ?: CompanionText.settle(note.text, null) else pending.await()
         if (state.value.stage != Stage.ACTIONS || state.value.note?.id != note.id) return
-        update { copy(thinking = false, selected = if (touched) selected else result.actions) }
-        if (voice) ask(CompanionText.offer(state.value.selected).ifEmpty { "Add to an alarm, calendar, reminder, or message? You can choose more than one, or say done." })
+        val plan = ActionKind.entries.associateWith { formFor(ActionRecord("", note.id, it), note) }
+        update { copy(thinking = false, selected = if (touched) selected else result.actions, plan = plan) }
+        val today = LocalDate.now()
+        if (voice) ask(JotLines.offer(state.value.selected) { kind -> plan[kind]?.let { JotLines.spokenWhen(kind, it.date, it.time, today) } }.ifEmpty { JotLines.ANYTHING_ELSE })
     }
 
     fun close() {
@@ -147,47 +173,64 @@ class JotController(private val context: Context) {
     } }
     fun toggleAction(kind: ActionKind) { touched = true; update { copy(selected = if (kind in selected) selected - kind else selected + kind) } }
 
-    fun continueActions() {
+    fun continueActions(activity: Activity? = null) {
         if (state.value.busy) return
         if (state.value.stage == Stage.NOTE) {
             update { copy(busy = true) }
             launch { val current = state.value; val note = current.note ?: return@launch
                 val saved = note.copy(text = current.text.trim(), updatedAt = System.currentTimeMillis(), draft = false)
                 if (saved.text.isBlank()) { notice("Enter a note."); return@launch }
-                draftJob?.cancelAndJoin(); store.saveNote(saved)
+                draftJob?.cancelAndJoin(); store.saveNote(saved); fresh = false
                 update { copy(note = saved, stage = Stage.ACTIONS, selected = emptySet(), existingActions = emptyList(), busy = false, thinking = true) }
                 suggest(saved, current.voiceSession)
             }; return
         }
         update { copy(busy = true) }
         launch {
-            val note = state.value.note ?: return@launch
-            val selected = state.value.selected.toList()
-            if (selected.isEmpty()) { finish("Note saved"); return@launch }
-            queue.clear()
-            for (kind in selected) {
-                val action = ActionRecord(UUID.randomUUID().toString(), note.id, kind)
+            val current = state.value
+            val kinds = ActionKind.entries.filter { it in current.selected }
+            if (kinds.isEmpty()) { finish("Note saved"); return@launch }
+            val note = current.note?.let { if (fresh) it.copy(actionOnly = true) else it } ?: return@launch
+            if (fresh) { store.saveNote(note); update { copy(note = note) } }
+            queue.clear(); done.clear(); auto = true
+            for (kind in kinds) {
+                val id = UUID.randomUUID().toString()
+                val action = current.plan[kind]?.let { record(it.copy(id = id), note.id, validate = false) } ?: ActionRecord(id, note.id, kind)
                 store.saveAction(action); queue.addLast(action)
             }
-            nextForm()
+            nextForm(activity)
         }
     }
 
-    private suspend fun nextForm() {
-        if (queue.isEmpty()) { finish("Saved"); return }
-        val action = queue.removeFirst()
-        baseAction = action
+    private suspend fun nextForm(activity: Activity? = null) {
         val note = state.value.note ?: return
+        while (queue.isNotEmpty()) {
+            val action = queue.removeFirst()
+            baseAction = action
+            val form = formFor(action, note)
+            if (auto) {
+                val ready = runCatching { record(form, note.id, validate = true) }.getOrNull()
+                if (ready != null && perform(note, ready, form, activity, approximate = false)) continue
+                if (state.value.stage == Stage.DETAILS && state.value.form?.id == form.id) return
+            }
+            update { copy(stage = Stage.DETAILS, form = form, busy = false, error = null, permission = null, thinking = false) }
+            if (state.value.voiceSession) promptForm()
+            return
+        }
+        val summary = done.joinToString(", ").lowercase().replaceFirstChar { it.uppercase() }.ifEmpty { "Saved" }
+        auto = false; done.clear()
+        finish(summary)
+    }
+
+    private fun formFor(action: ActionRecord, note: NoteRecord): ActionForm {
         val suggestion = TimeParser.suggest(note.text)
         val start = action.atMillis?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()) }
         val end = action.endMillis?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()) }
         val date = start?.toLocalDate() ?: suggestion.date
         val time = start?.toLocalTime() ?: suggestion.time
         val defaultEnd = if (date != null && time != null) LocalDateTime.of(date, time).plusMinutes(30) else null
-        val companionText = settled?.takeIf { readingText == note.text.trim() }?.let { if (action.kind == ActionKind.MESSAGE) it.message else it.title }
-        val form = ActionForm(action.id, action.kind, date, time, end?.toLocalDate() ?: defaultEnd?.toLocalDate(), end?.toLocalTime() ?: defaultEnd?.toLocalTime(), action.body ?: companionText ?: note.text, action.recipient.orEmpty())
-        update { copy(stage = Stage.DETAILS, form = form, busy = false, error = null, permission = null, thinking = false) }
-        if (state.value.voiceSession) promptForm()
+        val companionText = settled?.takeIf { note.text.trim() in readingKeys }?.let { if (action.kind == ActionKind.MESSAGE) it.message else it.title }
+        return ActionForm(action.id, action.kind, date, time, end?.toLocalDate() ?: defaultEnd?.toLocalDate(), end?.toLocalTime() ?: defaultEnd?.toLocalTime(), action.body ?: companionText ?: note.text, action.recipient.orEmpty())
     }
 
     fun updateForm(form: ActionForm) {
@@ -226,23 +269,45 @@ class JotController(private val context: Context) {
             val form = before.form ?: return@launch
             val action = record(form, note.id, validate = true)
             formJob?.cancelAndJoin()
-            if (baseAction?.status != ActionStatus.SCHEDULED) store.saveAction(action)
-            when (action.kind) {
-                ActionKind.REMINDER -> when (val result = androidActions.schedule(note, action, approximate)) {
-                    is ScheduleResult.Scheduled -> Unit
-                    ScheduleResult.NeedsExactPermission -> { update { copy(permission = PermissionNeed.EXACT_ALARMS, busy = false) }; if (before.voiceSession) { speak("Open Jot to allow exact reminders, or say approximate time.", listen = true) }; return@launch }
-                    ScheduleResult.NeedsNotifications -> { update { copy(permission = PermissionNeed.NOTIFICATIONS, busy = false) }; if (before.voiceSession) speak("Open Jot to allow reminder notifications."); return@launch }
-                    is ScheduleResult.Failed -> { notice(result.message); return@launch }
-                }
-                ActionKind.MESSAGE -> Unit
-                else -> if (activity != null && !activity.isFinishing) {
-                    val result = androidActions.dispatch(activity, note, action)
-                    if (result.isSuccess) store.saveAction(action.copy(status = ActionStatus.HANDED_OFF))
-                    else { notice(result.exceptionOrNull()?.message ?: "No app can open this action."); return@launch }
-                } else notifyPending(note)
-            }
-            nextForm()
+            if (perform(note, action, form, activity, approximate)) nextForm(activity)
         }
+    }
+
+    /** Carries out one action. False when it stopped on its form for a permission or an error. */
+    private suspend fun perform(note: NoteRecord, action: ActionRecord, form: ActionForm, activity: Activity?, approximate: Boolean): Boolean {
+        val voice = state.value.voiceSession
+        fun stop(permission: PermissionNeed? = null, error: String? = null): Boolean {
+            update { copy(stage = Stage.DETAILS, form = form, permission = permission, error = error, busy = false, thinking = false) }
+            return false
+        }
+        if (baseAction?.status != ActionStatus.SCHEDULED) store.saveAction(action)
+        when (action.kind) {
+            ActionKind.REMINDER -> when (val result = androidActions.schedule(note, action, approximate)) {
+                is ScheduleResult.Scheduled -> done += "Reminder set"
+                ScheduleResult.NeedsExactPermission -> { if (voice) speak(JotLines.ALLOW_EXACT, listen = true); return stop(PermissionNeed.EXACT_ALARMS) }
+                ScheduleResult.NeedsNotifications -> { if (voice) speak(JotLines.ALLOW_NOTIFICATIONS); return stop(PermissionNeed.NOTIFICATIONS) }
+                is ScheduleResult.Failed -> return stop(error = result.message)
+            }
+            ActionKind.MESSAGE -> {
+                val host = host(activity)
+                if (auto && host != null) androidActions.dispatch(host, note, action).fold(
+                    onSuccess = { store.saveAction(action.copy(status = it)); done += "Message ready" },
+                    onFailure = { return stop(error = it.message ?: "No app can open this action.") },
+                ) else done += "Draft saved"
+            }
+            else -> {
+                val host = host(activity)
+                when {
+                    androidActions.addEvent(note, action) -> { store.saveAction(action.copy(status = ActionStatus.DONE)); done += "Event added" }
+                    host != null -> androidActions.dispatch(host, note, action).fold(
+                        onSuccess = { store.saveAction(action.copy(status = it)); done += if (action.kind == ActionKind.ALARM) "Alarm set" else "Calendar opened" },
+                        onFailure = { return stop(error = it.message ?: "No app can open this action.") },
+                    )
+                    else -> { notifyPending(note); done += "Saved" }
+                }
+            }
+        }
+        return true
     }
 
     fun openAction(requested: ActionRecord, activity: Activity) {
@@ -253,11 +318,11 @@ class JotController(private val context: Context) {
         if (action.status == ActionStatus.CANCELLED) { notice("This action was cancelled."); return@launch }
         val note = store.note(action.noteId) ?: run { notice("This note no longer exists."); return@launch }
         if (action.kind == ActionKind.REMINDER || action.kind != ActionKind.MESSAGE && (action.atMillis == null || action.atMillis <= System.currentTimeMillis()) || action.kind == ActionKind.MESSAGE && action.body == null) {
-            queue.clear(); queue.add(action)
-            update { copy(note = note, text = note.text, voiceSession = false) }; nextForm(); return@launch
+            queue.clear(); queue.add(action); auto = false; done.clear()
+            update { copy(note = note, text = note.text, voiceSession = false) }; nextForm(activity); return@launch
         }
         androidActions.dispatch(activity, note, action).fold(
-            onSuccess = { store.saveAction(action.copy(status = ActionStatus.HANDED_OFF)); val actions = store.actions(note.id); update { copy(existingActions = actions, busy = false, message = "Opened ${if (action.kind == ActionKind.MESSAGE) "Messages" else if (action.kind == ActionKind.ALARM) "Clock" else "Calendar"}") } },
+            onSuccess = { status -> store.saveAction(action.copy(status = status)); val actions = store.actions(note.id); update { copy(existingActions = actions, busy = false, message = "Opened ${if (action.kind == ActionKind.MESSAGE) "Messages" else if (action.kind == ActionKind.ALARM) "Clock" else "Calendar"}") } },
             onFailure = { notice(it.message ?: "No app can open this action.") }
         )
     } }
@@ -274,55 +339,61 @@ class JotController(private val context: Context) {
     private fun finish(message: String) {
         val voice = state.value.voiceSession
         queue.clear(); mutable.value = JotUiState(message = message)
-        if (voice) speak(message)
+        if (voice) speak(JotLines.finished(message))
     }
     private fun ask(text: String) = speak(text, listen = true)
     private fun speak(text: String, listen: Boolean = false) { VoiceService.send(context, if (listen) VoiceService.SPEAK_LISTEN else VoiceService.SPEAK, text) }
 
     private fun promptForm() {
         val form = state.value.form ?: return
-        if (form.kind == ActionKind.MESSAGE) { ask("Message draft. ${form.body}. Say confirm or change it."); return }
-        if (form.kind != ActionKind.ALARM && form.date == null) { ask("What date?"); return }
-        if (form.time == null) { ask("What time? Include A M or P M."); return }
-        val date = form.date?.format(DateTimeFormatter.ofPattern("EEEE, MMMM d")).orEmpty()
-        val time = form.time.format(DateTimeFormatter.ofPattern("h mm a"))
-        val end = if (form.kind == ActionKind.CALENDAR && form.endTime != null) " Ends at ${form.endTime.format(DateTimeFormatter.ofPattern("h mm a"))}." else ""
-        ask("${form.kind.name.lowercase().replaceFirstChar { it.uppercase() }}. ${if (form.kind == ActionKind.ALARM) "Next" else date} $time.$end Say confirm or change it.")
+        if (form.kind == ActionKind.MESSAGE) { ask(JotLines.message(form.body)); return }
+        if (form.kind != ActionKind.ALARM && form.date == null) { ask(JotLines.WHAT_DAY); return }
+        if (form.time == null) { ask(JotLines.WHAT_TIME); return }
+        ask(JotLines.offer(setOf(form.kind)) { JotLines.spokenWhen(it, form.date, form.time, LocalDate.now()) })
     }
 
     private fun handleSpeech(heard: String) {
         val text = heard.trim().replace(Regex("^(hey\\s+jot[,.]?\\s*)", RegexOption.IGNORE_CASE), "")
-        if (text.isBlank()) { notice("I didn’t catch that. Try again."); return }
+        if (text.isBlank()) { if (state.value.voiceSession) ask(JotLines.MISSED_IT) else notice("I didn’t catch that. Try again."); return }
         when (state.value.stage) {
             Stage.CAPTURE -> {
                 updateText(text); update { copy(stage = Stage.NOTE, voiceSession = true) }
-                val pending = read(text)
-                if (companion.state.value != CompanionState.Ready || !CompanionText.asks(text)) { ask("$text. Say confirm, change it, or cancel."); return }
+                val pending = read(text, spoken = true)
+                if (companion.state.value != CompanionState.Ready) { ask(JotLines.readback(text)); return }
                 update { copy(thinking = true) }
                 launch {
-                    val result = pending.await()
+                    val result = withTimeoutOrNull(VOICE_WAIT_MS) { pending.await() }
                     if (state.value.stage != Stage.NOTE) return@launch
                     val unchanged = state.value.text == text
-                    if (result.question && unchanged) answer(text)
-                    else { update { copy(thinking = false) }; if (unchanged) ask("$text. Say confirm, change it, or cancel.") }
+                    val heard = result?.note?.takeIf { unchanged } ?: state.value.text
+                    if (result?.question == true && unchanged) { answer(heard); return@launch }
+                    if (heard != state.value.text) updateText(heard)
+                    update { copy(thinking = false) }
+                    if (unchanged) ask(JotLines.readback(heard))
                 }
             }
             Stage.NOTE -> when (ConversationCommands.review(text)) {
                 ReviewCommand.CONFIRM -> confirm()
                 ReviewCommand.CANCEL -> close()
-                ReviewCommand.CHANGE -> { update { copy(stage = Stage.CAPTURE, text = "") }; VoiceService.send(context, VoiceService.SPEAK_LISTEN, "What should the note say?") }
-                else -> ask("Say confirm, change it, or cancel.")
+                ReviewCommand.CHANGE -> redo()
+                else -> {
+                    val correction = ConversationCommands.correction(text)
+                    if (correction != null) { update { copy(stage = Stage.CAPTURE, text = "") }; handleSpeech(correction) }
+                    else if (ConversationCommands.review(text) == ReviewCommand.NO) redo()
+                    else ask(JotLines.IS_THAT_RIGHT)
+                }
             }
             Stage.ACTIONS -> {
                 val command = ConversationCommands.review(text)
-                if (command == ReviewCommand.CANCEL) { close(); return }
+                if (command == ReviewCommand.CANCEL || command == ReviewCommand.NO) { update { copy(selected = emptySet()) }; continueActions(); return }
                 if (command == ReviewCommand.CONFIRM && state.value.selected.isNotEmpty()) { continueActions(); return }
+                if (command == ReviewCommand.CONFIRM) { ask(JotLines.WHICH_ONE); return }
                 val actions = ConversationCommands.actions(text)
                 if (actions != null) { update { copy(selected = actions) }; continueActions(); return }
                 launch {
                     val picked = companion.read(text)?.actions.orEmpty()
                     if (state.value.stage != Stage.ACTIONS) return@launch
-                    if (picked.isEmpty()) ask("Alarm, calendar, reminder, message, or done?")
+                    if (picked.isEmpty()) ask(JotLines.WHICH_ONE)
                     else { update { copy(selected = picked) }; continueActions() }
                 }
             }
@@ -334,10 +405,10 @@ class JotController(private val context: Context) {
                     ReviewCommand.CANCEL -> {
                         if (state.value.busy) return
                         update { copy(busy = true) }
-                        launch { formJob?.cancelAndJoin(); baseAction?.takeIf { it.status == ActionStatus.PENDING }?.let { store.saveAction(it.copy(status = ActionStatus.CANCELLED)) }; nextForm() }
+                        launch { formJob?.cancelAndJoin(); baseAction?.takeIf { it.status == ActionStatus.PENDING }?.let { store.saveAction(it.copy(status = ActionStatus.CANCELLED)) }; nextForm(host(null)) }
                     }
-                    ReviewCommand.CHANGE -> {
-                        if (form.kind == ActionKind.MESSAGE) { changingMessage = true; ask("What should the message say?") }
+                    ReviewCommand.CHANGE, ReviewCommand.NO -> {
+                        if (form.kind == ActionKind.MESSAGE) { changingMessage = true; ask(JotLines.NEW_MESSAGE) }
                         else { updateForm(form.copy(date = null, time = null, endDate = null, endTime = null)); promptForm() }
                     }
                     else -> {
@@ -355,12 +426,17 @@ class JotController(private val context: Context) {
         }
     }
 
+    private fun redo() {
+        update { copy(stage = Stage.CAPTURE, text = "") }
+        VoiceService.send(context, VoiceService.SPEAK_LISTEN, JotLines.WHAT_SHOULD_IT_SAY)
+    }
+
     private suspend fun answer(question: String) {
         val draft = state.value.note
         draftJob?.cancelAndJoin()
         if (draft?.draft == true) store.deleteNote(draft.id)
-        update { copy(stage = Stage.ANSWER, note = null, text = question, thinking = true, answer = null, sources = emptyList()) }
-        val saved = store.observeNotes().first().filter { !it.note.draft && it.note.text.isNotBlank() }
+        update { copy(stage = Stage.ANSWER, note = null, text = question, thinking = true, busy = false, answer = null, sources = emptyList()) }
+        val saved = store.remembered()
         val matches = CompanionText.relevant(question, saved.map { it.note }).map { it.id }
         val context = saved.filter { it.note.id in matches }.sortedBy { matches.indexOf(it.note.id) }.ifEmpty { saved.take(10) }
         val reply = if (context.isEmpty()) CompanionText.NO_ANSWER else companion.answer(question, context.map { it.note }) ?: CompanionText.NO_ANSWER

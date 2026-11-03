@@ -9,8 +9,8 @@ android {
         applicationId = "com.clark.jot"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
@@ -26,6 +26,7 @@ android {
         release { isMinifyEnabled = false; if (signingFile.exists()) signingConfig = signingConfigs.getByName("personal") }
     }
     buildFeatures { compose = true }
+    androidResources { noCompress += listOf("onnx") }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     testOptions { unitTests.isReturnDefaultValues = true }

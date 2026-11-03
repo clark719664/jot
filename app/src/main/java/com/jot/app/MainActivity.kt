@@ -17,15 +17,18 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import com.jot.app.capture.*
+import com.jot.app.data.ActionKind
 import com.jot.app.platform.AndroidActions
 import com.jot.app.ui.*
 
 class MainActivity : ComponentActivity() {
     private val controller get() = (application as JotApplication).controller
     private var pendingVoice: String? = null
+    private var pendingContinue = false
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val command = pendingVoice
         pendingVoice = null
+        if (pendingContinue) { pendingContinue = false; controller.continueActions(this); return@registerForActivityResult }
         if (command != null) {
             if (!hasMicrophone()) controller.notice("Allow microphone access to record.")
             else if (command == VoiceService.START_WAKE && !NotificationManagerCompat.from(this).areNotificationsEnabled()) controller.notice("Allow notifications to enable Hey Jot.")
@@ -45,7 +48,7 @@ class MainActivity : ComponentActivity() {
                     onNew = { controller.newNote() }, onOpen = controller::open,
                     onTextChanged = controller::updateText, onConfirm = controller::confirm,
                     onClose = controller::close, onToggleAction = controller::toggleAction,
-                    onContinue = controller::continueActions, onFormChanged = controller::updateForm,
+                    onContinue = ::confirmActions, onFormChanged = controller::updateForm,
                     onSaveAction = { controller.saveAction(this) }, onOpenAction = { controller.openAction(it, this) },
                     onDeleteNote = controller::deleteNote, onRequestPermission = ::requestActionPermission,
                     onApproximate = { controller.saveAction(this, approximate = true) },
@@ -63,11 +66,21 @@ class MainActivity : ComponentActivity() {
     private fun openNotification(intent: Intent?) { intent?.getStringExtra(AndroidActions.EXTRA_NOTE_ID)?.let(controller::openNote) }
     override fun onResume() {
         super.onResume()
+        controller.attach(this)
         when (controller.state.value.permission) {
             PermissionNeed.EXACT_ALARMS -> if (Build.VERSION.SDK_INT < 31 || getSystemService(AlarmManager::class.java).canScheduleExactAlarms()) controller.saveAction(this)
             PermissionNeed.NOTIFICATIONS -> if (NotificationManagerCompat.from(this).areNotificationsEnabled()) controller.saveAction(this)
             else -> Unit
         }
+    }
+    override fun onPause() { controller.detach(this); super.onPause() }
+    private fun confirmActions() {
+        val state = controller.state.value
+        val calendar = arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
+        if (state.stage == Stage.ACTIONS && ActionKind.CALENDAR in state.selected && calendar.any { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }) {
+            pendingContinue = true
+            permissions.launch(calendar)
+        } else controller.continueActions(this)
     }
     private fun hasMicrophone() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     private fun beginVoice(command: String) {

@@ -208,7 +208,7 @@ class CompanionModel(private val context: Context, private val scope: CoroutineS
         private const val KEY_BACKEND = "backend"
         private const val TRYING_GPU = "trying-gpu"
         private const val TIMEOUT_MS = 30_000L
-        private const val READ_TOKENS = 160
+        private const val READ_TOKENS = 256
         private const val ANSWER_TOKENS = 80
         private const val IDLE_MS = 120_000L
         private const val TAG = "JotCompanion"

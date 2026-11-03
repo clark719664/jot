@@ -4,21 +4,22 @@ Voice notes that become alarms, events, reminders and messages.
 
 **[Download Jot.apk](https://github.com/clark719664/jot/releases/latest/download/Jot.apk)** · [clark719664.github.io/jot](https://clark719664.github.io/jot/)
 
-Say **Hey Jot**, dictate, confirm. Jot offers what fits: an alarm, a calendar event, a reminder or a message draft. Ask about your notes and it answers.
+Say **Hey Jot**, or tap the pen and type. Jot works out what you meant, fills in the details, and does it once you confirm: sets the alarm, adds the event, schedules the reminder, or opens your message ready to send. Ask about your notes and it answers. It talks back in a natural voice that runs on the phone.
 
 ## Install
 
 Android 8 or newer. Open `Jot.apk` on the phone and allow the install. Newer versions install over the old one and keep your notes.
 
-Allow the microphone for voice and notifications for **Hey Jot** and reminders. Precise reminders ask for Alarms and reminders access; approximate timing works without it.
+Allow the microphone for voice, notifications for **Hey Jot** and reminders, and the calendar to add events directly. Without calendar access, Calendar opens filled in for you to save. Precise reminders ask for Alarms and reminders access; approximate timing works without it.
 
 ## Companion
 
 Tap ✦ to download the companion: [Gemma 4 E2B](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm), 2.6 GB over Wi-Fi, running on the phone with [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM). With it, Jot:
 
+- fixes misheard words and reads the fixed note back,
 - picks the actions a note asks for,
 - titles events and reminders, and drafts messages for you to send,
-- answers questions about your notes: *"Hey Jot, what's the wifi password?"*
+- answers questions about your notes, spoken or typed: *"What's the wifi password?"*
 
 Without it, Jot still suggests actions from plain cues such as "remind me" or "wake me". Tap ✦ again to remove it. How it works: [docs/companion.md](docs/companion.md).
 
@@ -26,7 +27,7 @@ Without it, Jot still suggests actions from plain cues such as "remind me" or "w
 
 Notes, audio and the companion stay on the phone. The only network request is the companion download from Hugging Face, checked against a pinned SHA-256. No accounts, ads or analytics, and no cloud backup: uninstalling deletes your notes.
 
-Messages are drafts. You pick the recipient and send them yourself. Clock and Calendar open Android's own screens.
+Messages are drafts. You pick the recipient and send them yourself. An alarm, event or message made from a new note doesn't clutter your notes; a reminder stays listed until it fires.
 
 ## Build
 
@@ -49,7 +50,7 @@ Release builds are signed when `.local/signing.properties` exists; keep that key
 
 ## Limits
 
-Verified on an Android 16 emulator with recorded speech. Microphone acoustics, wake sensitivity, background limits, battery use and GPU speed still need real phones. Spoken readback needs an offline English text-to-speech voice.
+Verified on an Android 16 emulator with recorded and synthesized speech. Wake sensitivity on your voice, background limits, battery use and GPU speed still need real phones.
 
 ## License
 

@@ -56,4 +56,15 @@ New-Item -ItemType Directory -Force $libs | Out-Null
 Copy-Item -LiteralPath $runtime -Destination (Join-Path $libs 'sherpa-onnx-2.0.1.aar') -Force
 Install-Model $kwsArchive $kws '-epoch-12-avg-2-chunk-16-left-64.int8.onnx' (Join-Path $assets 'kws')
 Install-Model $asrArchive $asr '-epoch-99-avg-1.int8.onnx' (Join-Path $assets 'asr')
+
+$tts = 'sherpa-onnx-supertonic-3-tts-int8-2026-05-11'
+$ttsHash = '82fa96f91c4ef8abaae3a14a3f4153facf88bed821d1f7331cec2700f432c427'
+$ttsArchive = Get-PinnedAsset 'supertonic.tar.bz2' 'tts-models' "$tts.tar.bz2" 418881054 $ttsHash
+$ttsFiles = 'duration_predictor.int8.onnx', 'text_encoder.int8.onnx', 'vector_estimator.int8.onnx', 'vocoder.int8.onnx', 'tts.json', 'unicode_indexer.bin', 'voice.bin'
+$entries = @($ttsFiles | ForEach-Object { "$tts/$_" })
+tar -xf $ttsArchive -C $staging @entries
+if ($LASTEXITCODE -ne 0) { throw "Extracting $tts failed" }
+$ttsTarget = Join-Path $assets 'tts'
+New-Item -ItemType Directory -Force $ttsTarget | Out-Null
+foreach ($file in $ttsFiles) { Copy-Item -LiteralPath (Join-Path $staging "$tts/$file") -Destination $ttsTarget -Force }
 Write-Output 'Installed verified offline voice assets.'

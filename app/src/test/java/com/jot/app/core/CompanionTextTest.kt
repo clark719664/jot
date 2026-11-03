@@ -7,6 +7,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
@@ -16,7 +18,8 @@ class CompanionTextTest {
         Reading(question, kinds.toSet(), title, message)
 
     @Test fun parsesConstrainedJsonAndDropsDuplicates() {
-        val reading = CompanionText.parse("""{"question": false, "actions": ["message", "message", "calendar"], "title": " Dinner ", "message": "Hi Jake"}""")!!
+        val reading = CompanionText.parse("""{"note": "Dinner, ask Jake.", "question": false, "actions": ["message", "message", "calendar"], "title": " Dinner ", "message": "Hi Jake"}""")!!
+        assertEquals("Dinner, ask Jake.", reading.note)
         assertEquals(setOf(ActionKind.CALENDAR, ActionKind.MESSAGE), reading.actions)
         assertEquals("Dinner", reading.title)
         assertEquals("Hi Jake", reading.message)
@@ -91,9 +94,44 @@ class CompanionTextTest {
         assertEquals(emptyList<String>(), CompanionText.relevant("what is it", notes).map { it.id })
     }
 
+    @Test fun keepsCleanupThatStaysCloseToWhatWasHeard() {
+        assertEquals(
+            "Text Sam that I'm running ten minutes late.",
+            CompanionText.fix("text sam that im running ten minutes lake", "Text Sam that I'm running ten minutes late."),
+        )
+    }
+
+    @Test fun rejectsCleanupThatRewritesTheNote() {
+        assertEquals("buy milk eggs and bread", CompanionText.fix("buy milk eggs and bread", "Remember to pick up groceries from the store after work today."))
+        assertEquals("buy milk", CompanionText.fix("buy milk", ""))
+        assertEquals("buy milk", CompanionText.fix("buy milk", null))
+    }
+
+    @Test fun typedQuestionMarkCountsAsAsking() {
+        assertTrue(CompanionText.asks("wifi password?"))
+        assertFalse(CompanionText.asks("wifi password is maple 42"))
+    }
+
+    @Test fun speaksWhenEachActionHappens() {
+        val today = LocalDate.of(2026, 11, 3)
+        assertEquals("for 6:30 AM", JotLines.spokenWhen(ActionKind.ALARM, today, LocalTime.of(6, 30), today))
+        assertEquals("on Friday at 7 PM", JotLines.spokenWhen(ActionKind.CALENDAR, today.plusDays(3), LocalTime.of(19, 0), today))
+        assertEquals("tomorrow at 9 AM", JotLines.spokenWhen(ActionKind.REMINDER, today.plusDays(1), LocalTime.of(9, 0), today))
+        assertEquals("on November 20 at 9 AM", JotLines.spokenWhen(ActionKind.REMINDER, today.plusDays(17), LocalTime.of(9, 0), today))
+        assertNull(JotLines.spokenWhen(ActionKind.MESSAGE, today, LocalTime.NOON, today))
+        assertEquals("Want me to add an alarm for 6:30 AM and a message?", JotLines.offer(setOf(ActionKind.MESSAGE, ActionKind.ALARM)) { if (it == ActionKind.ALARM) "for 6:30 AM" else null })
+    }
+
+    @Test fun readsBackLikeAFriend() {
+        assertEquals("Got it. Dinner at 7 PM. Sound right?", JotLines.readback("Dinner at 7 PM."))
+        assertEquals("Got it. dinner at seven. Sound right?", JotLines.readback("dinner at seven"))
+        assertEquals("Done. Alarm set.", JotLines.finished("Alarm set"))
+        assertEquals("Okay, it's saved.", JotLines.finished("Note saved"))
+    }
+
     @Test fun offersActionsInOrder() {
-        assertEquals("Add a calendar event and a reminder?", CompanionText.offer(setOf(ActionKind.REMINDER, ActionKind.CALENDAR)))
-        assertEquals("Add an alarm?", CompanionText.offer(setOf(ActionKind.ALARM)))
-        assertEquals("", CompanionText.offer(emptySet()))
+        assertEquals("Want me to add a calendar event and a reminder?", JotLines.offer(setOf(ActionKind.REMINDER, ActionKind.CALENDAR)))
+        assertEquals("Want me to add an alarm?", JotLines.offer(setOf(ActionKind.ALARM)))
+        assertEquals("", JotLines.offer(emptySet()))
     }
 }

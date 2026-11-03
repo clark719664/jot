@@ -85,15 +85,32 @@ internal fun actionSummary(action: ActionRecord): String {
             ActionKind.MESSAGE -> "Opened in Messages"
             ActionKind.REMINDER -> action.kind.label
         }
+        ActionStatus.DONE -> when (action.kind) {
+            ActionKind.ALARM -> "Alarm set"
+            ActionKind.CALENDAR -> "Added to Calendar"
+            else -> action.kind.label
+        }
         ActionStatus.CANCELLED -> action.kind.label
     }
     val timestamp = action.atMillis ?: return title
-    if (action.status != ActionStatus.PENDING && action.status != ActionStatus.SCHEDULED) return title
+    if (action.status != ActionStatus.PENDING && action.status != ActionStatus.SCHEDULED && action.status != ActionStatus.DONE) return title
     val instant = Date(timestamp)
     val time = DateFormat.getTimeFormat(context).format(instant)
     if (action.kind == ActionKind.ALARM) return "$title · $time"
     val date = DateFormat.getMediumDateFormat(context).format(instant)
     return "$title · $date, $time"
+}
+
+@Composable
+internal fun formSummary(form: ActionForm): String? {
+    val context = LocalContext.current
+    val zone = java.time.ZoneId.systemDefault()
+    val time = form.time?.let { DateFormat.getTimeFormat(context).format(Date.from(java.time.LocalDate.now().atTime(it).atZone(zone).toInstant())) }
+    val date = form.date?.takeIf { form.kind != ActionKind.ALARM }?.let { DateFormat.getMediumDateFormat(context).format(Date.from(it.atStartOfDay(zone).toInstant())) }
+    val title = form.body.trim().takeIf { it.isNotEmpty() }
+    if (form.kind == ActionKind.MESSAGE) return title
+    val whenText = listOfNotNull(date, time).joinToString(", ").ifEmpty { null }
+    return listOfNotNull(if (form.kind == ActionKind.ALARM) whenText else title, if (form.kind == ActionKind.ALARM) title else whenText).joinToString(" · ").ifEmpty { null }
 }
 
 @Composable

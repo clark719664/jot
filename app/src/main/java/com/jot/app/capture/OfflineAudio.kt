@@ -6,6 +6,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.SystemClock
+import com.jot.app.core.MicGain
 import com.k2fsa.sherpa.onnx.EndpointConfig
 import com.k2fsa.sherpa.onnx.EndpointRule
 import com.k2fsa.sherpa.onnx.KeywordSpotter
@@ -31,6 +32,8 @@ internal class OfflineAudio(private val assets: AssetManager) {
             KeywordSpotterConfig(
                 modelConfig = model("kws"),
                 keywordsFile = "voice/kws/keywords.txt",
+                keywordsThreshold = WAKE_THRESHOLD,
+                keywordsScore = WAKE_SCORE,
             ),
         ).also { spotter = it }
         val coroutine = currentCoroutineContext()
@@ -39,12 +42,13 @@ internal class OfflineAudio(private val assets: AssetManager) {
             onRecording()
             var stream = model.createStream()
             var resetAt = SystemClock.elapsedRealtime() + WAKE_STREAM_MS
+            val gain = MicGain()
             try {
                 val pcm = ShortArray(FRAME_SAMPLES)
                 val waveform = FloatArray(FRAME_SAMPLES)
                 while (true) {
                     coroutine.ensureActive()
-                    stream.acceptWaveform(read(recorder, pcm, waveform), SAMPLE_RATE)
+                    stream.acceptWaveform(read(recorder, pcm, waveform, gain), SAMPLE_RATE)
                     while (model.isReady(stream)) {
                         coroutine.ensureActive()
                         model.decode(stream)
@@ -75,9 +79,10 @@ internal class OfflineAudio(private val assets: AssetManager) {
                 val pcm = ShortArray(FRAME_SAMPLES)
                 val waveform = FloatArray(FRAME_SAMPLES)
                 val deadline = SystemClock.elapsedRealtime() + CAPTURE_MS
+                val gain = MicGain()
                 while (SystemClock.elapsedRealtime() < deadline) {
                     coroutine.ensureActive()
-                    stream.acceptWaveform(read(recorder, pcm, waveform), SAMPLE_RATE)
+                    stream.acceptWaveform(read(recorder, pcm, waveform, gain), SAMPLE_RATE)
                     while (model.isReady(stream)) {
                         coroutine.ensureActive()
                         model.decode(stream)
@@ -155,7 +160,7 @@ internal class OfflineAudio(private val assets: AssetManager) {
         }
     }
 
-    private suspend fun read(recorder: AudioRecord, pcm: ShortArray, waveform: FloatArray): FloatArray {
+    private suspend fun read(recorder: AudioRecord, pcm: ShortArray, waveform: FloatArray, gain: MicGain): FloatArray {
         val deadline = SystemClock.elapsedRealtime() + MIC_TIMEOUT_MS
         var filled = 0
         while (filled < pcm.size) {
@@ -168,15 +173,18 @@ internal class OfflineAudio(private val assets: AssetManager) {
             if (filled < pcm.size) delay(MIC_POLL_MS)
         }
         for (i in pcm.indices) waveform[i] = pcm[i] / 32_768f
+        gain.apply(waveform)
         return waveform
     }
 
-    private companion object {
-        const val SAMPLE_RATE = 16_000
-        const val FRAME_SAMPLES = 640
-        const val MIC_POLL_MS = 20L
-        const val MIC_TIMEOUT_MS = 2_000L
-        const val CAPTURE_MS = 35_000L
-        const val WAKE_STREAM_MS = 120_000L
+    internal companion object {
+        const val WAKE_THRESHOLD = 0.1f
+        const val WAKE_SCORE = 2f
+        private const val SAMPLE_RATE = 16_000
+        private const val FRAME_SAMPLES = 640
+        private const val MIC_POLL_MS = 20L
+        private const val MIC_TIMEOUT_MS = 2_000L
+        private const val CAPTURE_MS = 35_000L
+        private const val WAKE_STREAM_MS = 120_000L
     }
 }

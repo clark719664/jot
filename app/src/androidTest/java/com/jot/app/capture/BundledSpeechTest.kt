@@ -29,7 +29,7 @@ class BundledSpeechTest {
         error("PCM fixture has no data chunk")
     }
     @Test fun bundledKeywordModelRecognizesWakePhraseAndRejectsUnrelatedSpeech() {
-        val model = KeywordSpotter(instrumentation.targetContext.assets, KeywordSpotterConfig(modelConfig = config("kws"), keywordsFile = "voice/kws/keywords.txt"))
+        val model = KeywordSpotter(instrumentation.targetContext.assets, KeywordSpotterConfig(modelConfig = config("kws"), keywordsFile = "voice/kws/keywords.txt", keywordsThreshold = OfflineAudio.WAKE_THRESHOLD, keywordsScore = OfflineAudio.WAKE_SCORE))
         fun detect(pcm: FloatArray): String {
             val stream = model.createStream()
             try {
@@ -40,7 +40,22 @@ class BundledSpeechTest {
                 return ""
             } finally { stream.release() }
         }
-        try { assertTrue("Hey Jot must activate the bundled model", detect(samples("hey-jot.wav")).isNotBlank()); assertEquals("", detect(samples("dictation.wav"))) }
+        fun quiet(pcm: FloatArray): FloatArray {
+            val gain = com.jot.app.core.MicGain()
+            val out = FloatArray(pcm.size)
+            for (offset in pcm.indices step 640) {
+                val frame = FloatArray(640) { pcm.getOrElse(offset + it) { 0f } * 0.05f }
+                gain.apply(frame)
+                frame.copyInto(out, offset, 0, minOf(640, pcm.size - offset))
+            }
+            return out
+        }
+        try {
+            assertTrue("Hey Jot must activate the bundled model", detect(samples("hey-jot.wav")).isNotBlank())
+            assertTrue("Hey Jot must activate at talking volume", detect(quiet(samples("hey-jot.wav"))).isNotBlank())
+            assertEquals("", detect(samples("dictation.wav")))
+            assertEquals("", detect(quiet(samples("dictation.wav"))))
+        }
         finally { model.release() }
     }
     @Test fun bundledSpeechModelTranscribesARecordedUtterance() {

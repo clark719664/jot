@@ -1,6 +1,6 @@
 # Companion
 
-The companion is an optional on-device language model. It reads each note, suggests actions, writes titles and message drafts, and answers questions about saved notes.
+The companion is an optional on-device language model. It cleans up what was heard, suggests actions, writes titles and message drafts, and answers questions about saved notes.
 
 ## Model
 
@@ -16,7 +16,7 @@ Android's DownloadManager fetches the file over unmetered networks only, into th
 
 ## How a note is read
 
-1. The note goes to the model with a short instruction and four worked examples. It replies with `{"question","actions","title","message"}`.
+1. The note goes to the model with a short instruction and five worked examples. It replies with `{"note","question","actions","title","message"}`.
 2. `CompanionText.settle` merges that reply with plain rules:
    - alarm, calendar and reminder need a time in the note or an explicit cue ("remind me", "wake me");
    - a message needs someone to tell, text or ask;
@@ -24,15 +24,21 @@ Android's DownloadManager fetches the file over unmetered networks only, into th
    - a question needs a question shape ("what", "where did I").
 3. Times come from `TimeParser`, never from the model.
 
-Reading starts as soon as dictation ends, so it usually finishes while Jot reads the note back. Voice sessions wait up to 10 seconds for it, then fall back to the rules alone.
+For spoken notes, `note` is the text as the user meant it: misheard words fixed, punctuation added. `CompanionText.fix` rejects a rewrite that strays too far from what was heard. Jot reads the fixed note back, so a bad fix is caught before anything happens. Voice sessions wait up to 10 seconds, then read back what was heard.
+
+## Doing the actions
+
+On confirm, each selected action runs if its details are complete, and only a gap opens a form: an alarm goes straight to Clock, an event straight into the primary writable calendar, a reminder into Android's alarm scheduler, and a message opens in Messages ready for you to pick a recipient and send. Without calendar access, Calendar opens filled in.
+
+A new note used for actions is marked `actionOnly`. It leaves the notes list once nothing is waiting on it, and stays searchable by the companion.
 
 ## Answers
 
-A spoken question is matched against saved notes by keyword. The best matches go to the model with an instruction to answer in one sentence from those notes only, or say it has no note about that. The matching notes show under the answer. **Save as note** keeps the question as a note instead.
+A spoken or typed question is matched against saved notes by keyword. The best matches go to the model with an instruction to answer in one sentence from those notes only, or say it has no note about that. The matching notes show under the answer. **Save as note** keeps the question as a note instead.
 
 ## Speed
 
-On an Android 16 x86_64 emulator (4 cores, CPU): load 1.5–2.6 s, reading a note 1.5–13 s, answering about 1 s. The engine unloads after two idle minutes.
+On an Android 16 x86_64 emulator (4 cores, CPU): load 1.5–2.6 s, reading a note 2–6 s, answering about 1 s. The engine unloads after two idle minutes.
 
 ## Debugging
 

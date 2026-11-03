@@ -1,6 +1,7 @@
 package com.jot.app.data
 
 import android.content.Context
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Embedded
@@ -16,10 +17,12 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 enum class ActionKind { ALARM, CALENDAR, REMINDER, MESSAGE }
-enum class ActionStatus { PENDING, SCHEDULED, HANDED_OFF, CANCELLED }
+enum class ActionStatus { PENDING, SCHEDULED, HANDED_OFF, CANCELLED, DONE }
 
 @Entity(tableName = "notes")
 data class NoteRecord(
@@ -28,6 +31,7 @@ data class NoteRecord(
     val createdAt: Long,
     val updatedAt: Long,
     val draft: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val actionOnly: Boolean = false,
 )
 
 @Entity(
@@ -77,8 +81,18 @@ private const val NONBLANK_NOTE_TEXT =
 @Dao
 internal interface JotDao {
     @Transaction
-    @Query("SELECT * FROM notes WHERE draft = 0 OR $NONBLANK_NOTE_TEXT ORDER BY updatedAt DESC, id")
+    @Query("""
+        SELECT * FROM notes WHERE (draft = 0 OR $NONBLANK_NOTE_TEXT) AND (actionOnly = 0 OR EXISTS(
+            SELECT 1 FROM actions LEFT JOIN reminder_receipts ON actions.id = reminder_receipts.actionId
+            WHERE actions.noteId = notes.id AND (actions.status = 'PENDING'
+                OR (actions.status = 'SCHEDULED' AND reminder_receipts.actionId IS NULL))
+        )) ORDER BY updatedAt DESC, id
+    """)
     fun observeNotes(): Flow<List<NoteItem>>
+
+    @Transaction
+    @Query("SELECT * FROM notes WHERE draft = 0 AND $NONBLANK_NOTE_TEXT ORDER BY updatedAt DESC, id")
+    suspend fun remembered(): List<NoteItem>
 
     @Query("SELECT * FROM notes WHERE id = :id")
     suspend fun note(id: String): NoteRecord?
@@ -131,7 +145,7 @@ internal interface JotDao {
 
 @Database(
     entities = [NoteRecord::class, ActionRecord::class, ReminderReceipt::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 internal abstract class JotDatabase : RoomDatabase() {
@@ -140,6 +154,7 @@ internal abstract class JotDatabase : RoomDatabase() {
 
 class JotStore private constructor(private val dao: JotDao) {
     fun observeNotes(): Flow<List<NoteItem>> = dao.observeNotes()
+    suspend fun remembered(): List<NoteItem> = dao.remembered()
     suspend fun note(id: String): NoteRecord? = dao.note(id)
     suspend fun draft(): NoteRecord? = dao.draft()
     suspend fun actions(noteId: String): List<ActionRecord> = dao.actions(noteId)
@@ -155,10 +170,16 @@ class JotStore private constructor(private val dao: JotDao) {
 
     companion object {
         @Volatile private var instance: JotStore? = null
+        private val addActionOnly = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE notes ADD COLUMN actionOnly INTEGER NOT NULL DEFAULT 0")
+            }
+        }
 
         fun get(context: Context): JotStore = instance ?: synchronized(this) {
             instance ?: JotStore(
                 Room.databaseBuilder(context.applicationContext, JotDatabase::class.java, "jot.db")
+                    .addMigrations(addActionOnly)
                     .build()
                     .dao(),
             ).also { instance = it }

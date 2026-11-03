@@ -62,24 +62,20 @@ class Screenshots {
                 main { controller.confirm() }
                 awaitState { controller.state.value.stage == Stage.ACTIONS && !controller.state.value.thinking }
                 shot("3-actions")
-                main { controller.continueActions() }
-                awaitState { controller.state.value.stage == Stage.DETAILS && !controller.state.value.busy }
-                shot("4-calendar")
                 main { controller.close() }
                 awaitState { controller.state.value.stage == Stage.HOME && !controller.state.value.busy }
 
                 typed("Text Sam that I'm running ten minutes late")
                 main { controller.confirm() }
                 awaitState { controller.state.value.stage == Stage.ACTIONS && !controller.state.value.thinking }
-                main { if (ActionKind.MESSAGE !in controller.state.value.selected) controller.toggleAction(ActionKind.MESSAGE); controller.continueActions() }
-                awaitState { controller.state.value.stage == Stage.DETAILS && !controller.state.value.busy }
+                main { if (ActionKind.MESSAGE !in controller.state.value.selected) controller.toggleAction(ActionKind.MESSAGE) }
                 shot("5-message")
                 main { controller.close() }
                 awaitState { controller.state.value.stage == Stage.HOME && !controller.state.value.busy }
 
                 main { controller.newNote(voice = true, captureAlreadyRunning = true) }
                 awaitState { controller.state.value.stage == Stage.CAPTURE && !controller.state.value.busy }
-                VoiceSignals.emit(VoiceEvent.Utterance("What's the wifi password"))
+                VoiceSignals.emit(VoiceEvent.Utterance("whats the wifi password"))
                 awaitState { controller.state.value.stage == Stage.ANSWER && !controller.state.value.thinking }
                 shot("6-answer")
                 main { controller.close() }

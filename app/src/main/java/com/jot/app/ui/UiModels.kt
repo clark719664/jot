@@ -31,6 +31,7 @@ data class JotUiState(
     val thinking: Boolean = false,
     val answer: String? = null,
     val sources: List<NoteItem> = emptyList(),
+    val plan: Map<ActionKind, ActionForm> = emptyMap(),
 )
 data class JotCallbacks(
     val onNew: () -> Unit,
