@@ -26,6 +26,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
@@ -33,6 +35,8 @@ import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconToggleButton
+import com.jot.app.companion.CompanionState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -91,6 +95,7 @@ fun JotScreen(
     notes: List<NoteItem>,
     state: JotUiState,
     voice: VoiceEngineState,
+    companion: CompanionState,
     callbacks: JotCallbacks,
 ) {
     val snackbar = remember { SnackbarHostState() }
@@ -111,6 +116,7 @@ fun JotScreen(
             notes,
             state,
             voice,
+            companion,
             callbacks,
             Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(),
         )
@@ -150,8 +156,10 @@ fun JotScreen(
                         Stage.NOTE -> "Note"
                         Stage.ACTIONS -> "Add to"
                         Stage.DETAILS -> state.form?.kind?.label.orEmpty()
+                        Stage.ANSWER -> "Answer"
                     }
                     SheetHeader(title, state.stage, !state.busy, callbacks.onClose)
+                    if (state.thinking) LinearProgressIndicator(Modifier.fillMaxWidth())
                     when (state.stage) {
                         Stage.HOME -> Unit
                         Stage.CAPTURE -> LinearProgressIndicator(
@@ -160,6 +168,7 @@ fun JotScreen(
                         Stage.NOTE -> NoteEditor(state, callbacks)
                         Stage.ACTIONS -> ActionChoices(state, callbacks)
                         Stage.DETAILS -> ActionDetails(state, callbacks)
+                        Stage.ANSWER -> AnswerView(state, callbacks)
                     }
                     Feedback(state, voice, callbacks)
                     SnackbarHost(snackbar)
@@ -174,6 +183,7 @@ private fun NotesHome(
     notes: List<NoteItem>,
     state: JotUiState,
     voice: VoiceEngineState,
+    companion: CompanionState,
     callbacks: JotCallbacks,
     modifier: Modifier,
 ) {
@@ -205,6 +215,7 @@ private fun NotesHome(
                 modifier = Modifier.weight(1f).semantics { heading() },
                 style = MaterialTheme.typography.headlineLarge,
             )
+            CompanionButton(companion, enabled = !state.busy, onToggle = callbacks.onCompanionToggle)
             IconButton(
                 onClick = {
                     if (searching) closeSearch() else searching = true
@@ -488,6 +499,74 @@ private fun NoteEditor(state: JotUiState, callbacks: JotCallbacks) {
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun CompanionButton(companion: CompanionState, enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    var asking by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    val on = companion is CompanionState.Ready || companion is CompanionState.Downloading
+    IconToggleButton(
+        checked = on,
+        onCheckedChange = { asking = it },
+        enabled = enabled,
+        modifier = Modifier.size(48.dp).semantics { contentDescription = "Companion" },
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            if (companion is CompanionState.Downloading) {
+                val progress = companion.progress
+                if (progress == null || companion.waitingForWifi) CircularProgressIndicator(Modifier.size(34.dp), strokeWidth = 2.dp)
+                else CircularProgressIndicator(progress = { progress }, modifier = Modifier.size(34.dp), strokeWidth = 2.dp)
+            }
+            Icon(
+                if (on) Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome,
+                contentDescription = null,
+                tint = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(if (companion is CompanionState.Downloading) 18.dp else 24.dp),
+            )
+        }
+    }
+    when (asking) {
+        true -> AlertDialog(
+            onDismissRequest = { asking = null },
+            title = { Text("Download companion?") },
+            text = { Text("${"%.1f".format(com.jot.app.companion.CompanionModel.SIZE / 1e9)} GB over Wi-Fi") },
+            confirmButton = { TextButton(onClick = { asking = null; onToggle(true) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Download") } },
+            dismissButton = { TextButton(onClick = { asking = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Cancel") } },
+        )
+        false -> AlertDialog(
+            onDismissRequest = { asking = null },
+            title = { Text(if (companion is CompanionState.Downloading) "Stop download?" else "Remove companion?") },
+            confirmButton = { TextButton(onClick = { asking = null; onToggle(false) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (companion is CompanionState.Downloading) "Stop" else "Remove", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { asking = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Cancel") } },
+        )
+        null -> Unit
+    }
+}
+
+@Composable
+private fun AnswerView(state: JotUiState, callbacks: JotCallbacks) {
+    Text(state.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    state.answer?.let { answer ->
+        Text(answer, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+    }
+    state.sources.forEach { item ->
+        HorizontalDivider()
+        Text(
+            item.note.text,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .clickable(enabled = !state.busy, role = Role.Button) { callbacks.onOpen(item) }
+                .padding(vertical = 12.dp),
+            style = MaterialTheme.typography.bodyLarge,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+    if (!state.thinking) {
+        PrimaryAction("Done", enabled = !state.busy, modifier = Modifier.fillMaxWidth(), onClick = callbacks.onClose)
+        TextButton(onClick = callbacks.onKeepQuestion, enabled = !state.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+            Text("Save as note")
+        }
     }
 }
 

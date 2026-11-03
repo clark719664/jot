@@ -4,7 +4,7 @@ import com.jot.app.data.*
 import java.time.LocalDate
 import java.time.LocalTime
 
-enum class Stage { HOME, CAPTURE, NOTE, ACTIONS, DETAILS }
+enum class Stage { HOME, CAPTURE, NOTE, ACTIONS, DETAILS, ANSWER }
 enum class PermissionNeed { MICROPHONE, NOTIFICATIONS, EXACT_ALARMS }
 data class ActionForm(
     val id: String,
@@ -28,6 +28,9 @@ data class JotUiState(
     val permission: PermissionNeed? = null,
     val voiceSession: Boolean = false,
     val busy: Boolean = false,
+    val thinking: Boolean = false,
+    val answer: String? = null,
+    val sources: List<NoteItem> = emptyList(),
 )
 data class JotCallbacks(
     val onNew: () -> Unit,
@@ -46,4 +49,6 @@ data class JotCallbacks(
     val onMic: () -> Unit,
     val onWakeToggle: (Boolean) -> Unit,
     val onDismissMessage: () -> Unit,
+    val onCompanionToggle: (Boolean) -> Unit,
+    val onKeepQuestion: () -> Unit,
 )

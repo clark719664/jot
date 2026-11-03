@@ -29,8 +29,11 @@ class SaveCancellationTest {
         val noteId = controller.state.value.note!!.id
         try {
             main { controller.updateText("Verification reminder"); controller.confirm() }
-            awaitState { controller.state.value.stage == Stage.ACTIONS && !controller.state.value.busy }
-            main { controller.toggleAction(ActionKind.REMINDER); controller.continueActions() }
+            awaitState { controller.state.value.stage == Stage.ACTIONS && !controller.state.value.busy && !controller.state.value.thinking }
+            main {
+                if (ActionKind.REMINDER !in controller.state.value.selected) controller.toggleAction(ActionKind.REMINDER)
+                controller.continueActions()
+            }
             awaitState { controller.state.value.stage == Stage.DETAILS && !controller.state.value.busy }
             val whenDue = LocalDateTime.now().plusHours(2).withSecond(0).withNano(0)
             main {

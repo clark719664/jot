@@ -39,8 +39,9 @@ class MainActivity : ComponentActivity() {
             val notes by controller.notes.collectAsStateWithLifecycle()
             val state by controller.state.collectAsStateWithLifecycle()
             val voice by VoiceSignals.state.collectAsStateWithLifecycle()
+            val companion by controller.companion.state.collectAsStateWithLifecycle()
             JotTheme {
-                JotScreen(notes, state, voice, JotCallbacks(
+                JotScreen(notes, state, voice, companion, JotCallbacks(
                     onNew = { controller.newNote() }, onOpen = controller::open,
                     onTextChanged = controller::updateText, onConfirm = controller::confirm,
                     onClose = controller::close, onToggleAction = controller::toggleAction,
@@ -51,6 +52,8 @@ class MainActivity : ComponentActivity() {
                     onMic = { beginVoice(VoiceService.CAPTURE) },
                     onWakeToggle = { enabled -> if (enabled) beginVoice(VoiceService.START_WAKE) else VoiceService.send(this, VoiceService.STOP) },
                     onDismissMessage = controller::dismissMessage,
+                    onCompanionToggle = controller::setCompanion,
+                    onKeepQuestion = controller::keepQuestion,
                 ))
             }
         }

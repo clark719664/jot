@@ -101,14 +101,14 @@ internal fun ActionDetails(state: JotUiState, callbacks: JotCallbacks) {
     val form = state.form ?: return
     val focusManager = LocalFocusManager.current
     val enabled = !state.busy
-    val note = state.note?.text
-    if (!note.isNullOrBlank() && form.kind != ActionKind.MESSAGE) {
-        Text(
-            note,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium,
+    if (form.kind != ActionKind.MESSAGE) {
+        OutlinedTextField(
+            value = form.body,
+            onValueChange = { callbacks.onFormChanged(form.copy(body = it)) },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Title") },
             maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
+            enabled = enabled,
         )
     }
 
