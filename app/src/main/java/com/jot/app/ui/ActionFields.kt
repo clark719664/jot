@@ -52,6 +52,8 @@ import java.time.LocalTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import com.jot.app.core.JotLines
+import com.jot.app.core.TimeParser
 import java.util.Date
 import java.util.TimeZone
 
@@ -102,14 +104,15 @@ internal fun actionSummary(action: ActionRecord): String {
 }
 
 @Composable
-internal fun formSummary(form: ActionForm): String? {
+internal fun formSummary(form: ActionForm, note: String): String? {
     val context = LocalContext.current
     val zone = java.time.ZoneId.systemDefault()
     val time = form.time?.let { DateFormat.getTimeFormat(context).format(Date.from(java.time.LocalDate.now().atTime(it).atZone(zone).toInstant())) }
     val date = form.date?.takeIf { form.kind != ActionKind.ALARM }?.let { DateFormat.getMediumDateFormat(context).format(Date.from(it.atStartOfDay(zone).toInstant())) }
     val title = form.body.trim().takeIf { it.isNotEmpty() }
     if (form.kind == ActionKind.MESSAGE) return title
-    val whenText = listOfNotNull(date, time).joinToString(", ").ifEmpty { null }
+    val repeat = JotLines.repeats(TimeParser.repeatDays(note)).takeIf { form.kind == ActionKind.ALARM }
+    val whenText = listOfNotNull(date, time, repeat).joinToString(", ").ifEmpty { null }
     return listOfNotNull(if (form.kind == ActionKind.ALARM) whenText else title, if (form.kind == ActionKind.ALARM) title else whenText).joinToString(" · ").ifEmpty { null }
 }
 

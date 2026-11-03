@@ -28,6 +28,28 @@ class BundledSpeechTest {
         }
         error("PCM fixture has no data chunk")
     }
+    private fun heard(file: String): String = kotlinx.coroutines.runBlocking {
+        val pcm = samples(file)
+        var offset = 0
+        val audio = OfflineAudio(instrumentation.targetContext.assets)
+        try {
+            audio.hear({
+                FloatArray(640) { pcm.getOrElse(offset + it) { 0f } }.also { offset += 640 }
+            }, {}, {})
+        } finally { audio.close() }
+    }
+
+    @Test fun noteAfterHeyJotKeepsItsFirstWords() {
+        val text = heard("wake-then-note.wav")
+        assertTrue(text, text.contains("need to set an alarm"))
+        assertTrue(text, text.contains("school"))
+    }
+
+    @Test fun noteSaidInOneBreathWithHeyJotIsKept() {
+        val text = heard("wake-one-breath.wav")
+        assertTrue(text, text.contains("an alarm for six fifty") && !text.contains("jot"))
+    }
+
     @Test fun bundledKeywordModelRecognizesWakePhraseAndRejectsUnrelatedSpeech() {
         val model = KeywordSpotter(instrumentation.targetContext.assets, KeywordSpotterConfig(modelConfig = config("kws"), keywordsFile = "voice/kws/keywords.txt", keywordsThreshold = OfflineAudio.WAKE_THRESHOLD, keywordsScore = OfflineAudio.WAKE_SCORE))
         fun detect(pcm: FloatArray): String {

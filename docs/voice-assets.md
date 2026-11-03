@@ -4,6 +4,10 @@ Jot uses the CPU build of sherpa-onnx with an English keyword spotter, a streami
 
 ## Tuning
 
+The microphone stays open from "Hey Jot" through the note, with a 10-second buffer, so nothing is lost while the phone is busy and a sentence can follow the wake word in one breath. A short vibration confirms the wake word, because a tone would land in the recording.
+
+The streaming recognizer drops the first words of a stream unless it gets a lead-in: with up to 0.5 s of silence or noise it lost "I need to set an alarm" from a test sentence, and with 2 s it kept it in every case. Each recording starts with 2 s of silence for that reason. This adds no delay, because it is decoded faster than real time.
+
 The microphone source has no automatic gain, so `MicGain` lifts quiet speech by up to 20× before the wake word and dictation. The wake word runs at threshold 0.1 and score 2. Those values came from scoring 32 synthesized "Hey Jot" clips and 44 negatives (sound-alikes such as "Hey John", plus everyday speech) at four microphone levels: at talking volume wakes rose from 19 to 27 of 32, at quiet volume from 14 to 25, with no false wakes. Those figures use synthesized voices, not real people.
 
 Jot speaks with Supertonic speaker 1 at speed 1.05 and 5 steps. On the emulator it generates about five seconds of speech per second.

@@ -587,7 +587,7 @@ private fun ActionChoices(state: JotUiState, callbacks: JotCallbacks) {
                 Checkbox(checked = checked, onCheckedChange = null, enabled = !state.busy)
                 Column(Modifier.weight(1f)) {
                     Text(kind.label, style = MaterialTheme.typography.bodyLarge)
-                    val detail = state.plan[kind]?.takeIf { checked }?.let { formSummary(it) }
+                    val detail = state.plan[kind]?.takeIf { checked }?.let { formSummary(it, state.text) }
                     if (detail != null) {
                         Text(
                             detail,

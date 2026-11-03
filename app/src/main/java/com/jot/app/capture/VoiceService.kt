@@ -9,12 +9,12 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioManager
-import android.media.ToneGenerator
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.speech.tts.TextToSpeech
 import com.jot.app.R
 import kotlinx.coroutines.CancellationException
@@ -119,18 +119,23 @@ class VoiceService : Service() {
         while (wakeRequested) {
             requireMicrophone()
             publish(loading = !wakeEnabled)
-            withContext(audioDispatcher) {
-                audio.waitForWake {
-                    withContext(Dispatchers.Main) {
-                        wakeEnabled = true
-                        acquireWakeLock()
-                        publish()
-                    }
-                }
+            val text = withContext(audioDispatcher) {
+                audio.listen(
+                    onListening = {
+                        withContext(Dispatchers.Main) {
+                            wakeEnabled = true
+                            acquireWakeLock()
+                            publish()
+                        }
+                    },
+                    onWake = {
+                        VoiceSignals.emit(VoiceEvent.Wake)
+                        tick()
+                    },
+                    onRecording = { withContext(Dispatchers.Main) { publish(capturing = true) } },
+                )
             }
-            VoiceSignals.emit(VoiceEvent.Wake)
-            playReadyTone()
-            collectUtterance()
+            deliver(text)
         }
     }
 
@@ -148,6 +153,10 @@ class VoiceService : Service() {
                 withContext(Dispatchers.Main) { publish(capturing = true) }
             }
         }
+        deliver(text)
+    }
+
+    private suspend fun deliver(text: String) {
         publish()
         if (text.isBlank()) {
             report("I didn’t catch any speech. Try again.")
@@ -158,15 +167,9 @@ class VoiceService : Service() {
         }
     }
 
-    private suspend fun playReadyTone() {
-        val tone = runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, 65) }.getOrNull() ?: return
-        try {
-            if (tone.startTone(ToneGenerator.TONE_PROP_BEEP, READY_TONE_MS)) {
-                delay(READY_TONE_MS.toLong() + 35L)
-            }
-        } finally {
-            tone.release()
-        }
+    private fun tick() {
+        val vibrator = getSystemService(Vibrator::class.java) ?: return
+        vibrator.vibrate(VibrationEffect.createOneShot(WAKE_TICK_MS, VibrationEffect.DEFAULT_AMPLITUDE))
     }
 
     private fun publish(capturing: Boolean = false, speaking: Boolean = false, loading: Boolean = false) {
@@ -288,7 +291,7 @@ class VoiceService : Service() {
         const val RESUME_WAKE = "com.jot.app.voice.RESUME_WAKE"
         private const val CHANNEL_ID = "jot_voice"
         private const val NOTIFICATION_ID = 100
-        private const val READY_TONE_MS = 145
+        private const val WAKE_TICK_MS = 40L
         // Long enough for the companion to read a note and answer before Jot speaks again.
         private const val CONTROLLER_TIMEOUT_MS = 75_000L
         private const val WAKE_LOCK_TIMEOUT_MS = 120_000L

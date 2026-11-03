@@ -48,7 +48,7 @@ class VoiceLoopTest {
             begin()
             await("recording") { VoiceSignals.state.value.capturing || VoiceSignals.state.value.listening }
             VoiceSignals.emit(VoiceEvent.Utterance("text sam that im running ten minutes lake"))
-            await("the note") { controller.state.value.stage == Stage.NOTE && !controller.state.value.thinking }
+            await("the note", 120_000) { controller.state.value.stage == Stage.NOTE && !controller.state.value.thinking }
             await("Jot to speak") { VoiceSignals.state.value.speaking }
             Log.i("JotVoiceLoop", "speaking: ${controller.state.value.text}")
             if (companion) assertTrue(controller.state.value.text, controller.state.value.text.contains("late") && !controller.state.value.text.contains("lake"))

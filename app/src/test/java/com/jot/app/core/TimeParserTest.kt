@@ -7,6 +7,16 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class TimeParserTest {
+    @Test fun readsRepeatingDays() {
+        assertEquals(java.time.DayOfWeek.entries, TimeParser.repeatDays("alarm for 6:50 am every day to get the kids up"))
+        assertEquals(java.time.DayOfWeek.entries, TimeParser.repeatDays("wake me up daily at 7"))
+        assertEquals(java.time.DayOfWeek.entries.take(5), TimeParser.repeatDays("alarm at 6 on weekdays"))
+        assertEquals(listOf(java.time.DayOfWeek.MONDAY, java.time.DayOfWeek.FRIDAY), TimeParser.repeatDays("every Monday and Friday at 8 am"))
+        assertEquals(emptyList<java.time.DayOfWeek>(), TimeParser.repeatDays("alarm for Monday at 8 am"))
+        assertEquals("every day", JotLines.repeats(java.time.DayOfWeek.entries))
+        assertEquals("every Monday and Friday", JotLines.repeats(listOf(java.time.DayOfWeek.MONDAY, java.time.DayOfWeek.FRIDAY)))
+    }
+
     private val now = ZonedDateTime.parse("2026-11-02T23:50:00-05:00[America/New_York]")
 
     @Test fun tomorrowAtNineLeavesTimeAmbiguous() {

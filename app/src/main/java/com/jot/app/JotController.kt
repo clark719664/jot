@@ -20,8 +20,9 @@ import java.time.*
 import java.lang.ref.WeakReference
 import java.util.UUID
 
-private const val VOICE_WAIT_MS = 25_000L
+private const val VOICE_WAIT_MS = 45_000L
 private const val ONE_SEC_AFTER_MS = 2_000L
+private const val ALMOST_AFTER_MS = 10_000L
 
 class JotController(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -146,7 +147,10 @@ class JotController(private val context: Context) {
         val plan = ActionKind.entries.associateWith { formFor(ActionRecord("", note.id, it), note) }
         update { copy(thinking = false, selected = if (touched) selected else result.actions, plan = plan) }
         val today = LocalDate.now()
-        if (voice) ask(JotLines.offer(state.value.selected) { kind -> plan[kind]?.let { JotLines.spokenWhen(kind, it.date, it.time, today) } }.ifEmpty { JotLines.ANYTHING_ELSE })
+        val repeat = JotLines.repeats(TimeParser.repeatDays(note.text))
+        if (voice) ask(JotLines.offer(state.value.selected) { kind ->
+            plan[kind]?.let { form -> JotLines.spokenWhen(kind, form.date, form.time, today)?.let { if (kind == ActionKind.ALARM && repeat != null) "$it $repeat" else it } }
+        }.ifEmpty { JotLines.ANYTHING_ELSE })
     }
 
     fun close() {
@@ -354,7 +358,7 @@ class JotController(private val context: Context) {
     }
 
     private fun handleSpeech(heard: String) {
-        val text = heard.trim().replace(Regex("^(hey\\s+jot[,.]?\\s*)", RegexOption.IGNORE_CASE), "")
+        val text = heard.trim().replace(Regex("^(?:hey\\s+)?jot\\b(?!\\s+(?:down|that|this|it)\\b)[,.]?\\s*", RegexOption.IGNORE_CASE), "")
         if (text.isBlank()) { if (state.value.voiceSession) ask(JotLines.MISSED_IT) else notice("I didn’t catch that. Try again."); return }
         when (state.value.stage) {
             Stage.CAPTURE -> {
@@ -363,7 +367,10 @@ class JotController(private val context: Context) {
                 if (companion.state.value != CompanionState.Ready) { ask(JotLines.readback(text)); return }
                 update { copy(thinking = true) }
                 launch {
-                    val filler = scope.launch { delay(ONE_SEC_AFTER_MS); VoiceService.send(context, VoiceService.SPEAK_HOLD, JotLines.ONE_SEC) }
+                    val filler = scope.launch {
+                        delay(ONE_SEC_AFTER_MS); VoiceService.send(context, VoiceService.SPEAK_HOLD, JotLines.ONE_SEC)
+                        delay(ALMOST_AFTER_MS); VoiceService.send(context, VoiceService.SPEAK_HOLD, JotLines.ALMOST_THERE)
+                    }
                     val result = withTimeoutOrNull(VOICE_WAIT_MS) { pending.await() }
                     filler.cancel()
                     if (state.value.stage != Stage.NOTE) return@launch

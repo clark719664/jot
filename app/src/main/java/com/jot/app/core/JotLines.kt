@@ -1,6 +1,7 @@
 package com.jot.app.core
 
 import com.jot.app.data.ActionKind
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -9,6 +10,7 @@ import java.util.Locale
 /** Everything Jot says out loud. Short, warm, and never a list of commands. */
 object JotLines {
     const val ONE_SEC = "One sec."
+    const val ALMOST_THERE = "Almost there."
     const val WHAT_SHOULD_IT_SAY = "No problem. What should it say?"
     const val IS_THAT_RIGHT = "Sorry, did I get that right?"
     const val MISSED_IT = "Sorry, I didn't catch that. One more time?"
@@ -37,6 +39,14 @@ object JotLines {
         }
         if (names.isEmpty()) return ""
         return "Want me to add " + (if (names.size == 1) names[0] else names.dropLast(1).joinToString(", ") + " and " + names.last()) + "?"
+    }
+
+    fun repeats(days: List<DayOfWeek>): String? = when {
+        days.isEmpty() -> null
+        days.size == 7 -> "every day"
+        days == DayOfWeek.entries.take(5) -> "on weekdays"
+        days == DayOfWeek.entries.drop(5) -> "on weekends"
+        else -> "every " + days.joinToString(" and ") { it.name.lowercase(Locale.ROOT).replaceFirstChar(Char::uppercase) }
     }
 
     fun message(body: String) = "Here's what I've got: $body Sound good?"

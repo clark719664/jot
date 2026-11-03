@@ -20,11 +20,13 @@ import android.provider.CalendarContract
 import android.util.Log
 import com.jot.app.MainActivity
 import com.jot.app.R
+import com.jot.app.core.TimeParser
 import com.jot.app.data.ActionKind
 import com.jot.app.data.ActionRecord
 import com.jot.app.data.ActionStatus
 import com.jot.app.data.JotStore
 import com.jot.app.data.NoteRecord
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -144,7 +146,7 @@ class AndroidActions(context: Context, private val store: JotStore = JotStore.ge
             require(action.noteId == note.id && !note.draft) { "Save the note before opening another app." }
             val text = action.body?.takeIf { it.isNotBlank() } ?: note.text
             val intent = when (action.kind) {
-                ActionKind.ALARM -> clockIntent(action, text)
+                ActionKind.ALARM -> clockIntent(action, text, TimeParser.repeatDays(note.text))
                 ActionKind.CALENDAR -> calendarIntent(action, text)
                 ActionKind.MESSAGE -> messageIntent(action, text)
                 ActionKind.REMINDER -> error("Schedule this reminder in Jot.")
@@ -225,7 +227,7 @@ class AndroidActions(context: Context, private val store: JotStore = JotStore.ge
         store.recordDelivery(id)
     }
 
-    private fun clockIntent(action: ActionRecord, text: String): Intent {
+    private fun clockIntent(action: ActionRecord, text: String, repeat: List<DayOfWeek>): Intent {
         val now = ZonedDateTime.now()
         val time = Instant.ofEpochMilli(futureStart(action)).atZone(now.zone)
         val clockTime = time.toLocalTime().withSecond(0).withNano(0)
@@ -241,6 +243,10 @@ class AndroidActions(context: Context, private val store: JotStore = JotStore.ge
             .putExtra(AlarmClock.EXTRA_MINUTES, time.minute)
             .putExtra(AlarmClock.EXTRA_MESSAGE, text)
             .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+            .also { intent ->
+                // Calendar counts days from Sunday = 1.
+                if (repeat.isNotEmpty()) intent.putIntegerArrayListExtra(AlarmClock.EXTRA_DAYS, ArrayList(repeat.map { it.value % 7 + 1 }))
+            }
     }
 
     private fun calendarIntent(action: ActionRecord, text: String): Intent {

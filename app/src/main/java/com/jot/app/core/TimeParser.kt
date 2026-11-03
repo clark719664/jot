@@ -90,6 +90,17 @@ object TimeParser {
         return TimeSuggestion(date, LocalTime.of(hour % 12 + if (afternoonOrLater) 12 else 0, minute))
     }
 
+    /** Days a note asks to repeat on: "every day", "weekdays", "every Monday and Friday". Empty for one time. */
+    fun repeatDays(text: String): List<DayOfWeek> {
+        val value = text.lowercase(Locale.ROOT).replace(Regex("[^a-z ]"), " ").replace(Regex("\\s+"), " ")
+        if (Regex("""\b(every ?day|daily|each day)\b""").containsMatchIn(value)) return DayOfWeek.entries
+        if (Regex("""\b(every weekday|weekdays)\b""").containsMatchIn(value)) return DayOfWeek.entries.take(5)
+        if (Regex("""\b(every weekend|weekends)\b""").containsMatchIn(value)) return DayOfWeek.entries.drop(5)
+        val days = weekdays.keys.joinToString("|")
+        val listed = Regex("""\b(?:every|each) ((?:(?:$days)s?(?:,? and |,? )?)+)""").find(value)?.groupValues?.get(1) ?: return emptyList()
+        return DayOfWeek.entries.filter { it.name.lowercase(Locale.ROOT) in listed }
+    }
+
     private fun parseNumber(text: String): Int? {
         text.toIntOrNull()?.let { return it }
         if (text == "a" || text == "an") return 1
