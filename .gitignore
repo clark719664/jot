@@ -1,0 +1,11 @@
+.gradle/
+**/build/
+local.properties
+.local/
+*.jks
+*.keystore
+*.log
+verification/
+app/libs/*.aar
+app/src/main/assets/voice/**/*.onnx
+app/src/main/assets/voice/**/tokens.txt
