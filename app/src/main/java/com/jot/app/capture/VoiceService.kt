@@ -88,12 +88,16 @@ class VoiceService : Service() {
                     START_WAKE -> restoreWake()
                     CAPTURE -> capture()
                     RESUME_WAKE -> restoreWake()
-                    SPEAK, SPEAK_LISTEN -> {
+                    SPEAK, SPEAK_LISTEN, SPEAK_HOLD -> {
                         publish(speaking = true)
                         val line = text.orEmpty()
                         val spoken = voice.speak(line) || speech.speak(line.take(TextToSpeech.getMaxSpeechInputLength()))
                         if (!spoken) report("No offline English speech voice is available, or playback was interrupted.")
-                        if (spoken && command == SPEAK_LISTEN) capture() else restoreWake()
+                        when {
+                            spoken && command == SPEAK_LISTEN -> capture()
+                            command == SPEAK_HOLD -> { publish(); delay(CONTROLLER_TIMEOUT_MS); restoreWake() }
+                            else -> restoreWake()
+                        }
                     }
                 }
             } catch (cancelled: CancellationException) {
@@ -280,11 +284,13 @@ class VoiceService : Service() {
         const val STOP = "com.jot.app.voice.STOP"
         const val SPEAK = "com.jot.app.voice.SPEAK"
         const val SPEAK_LISTEN = "com.jot.app.voice.SPEAK_LISTEN"
+        const val SPEAK_HOLD = "com.jot.app.voice.SPEAK_HOLD"
         const val RESUME_WAKE = "com.jot.app.voice.RESUME_WAKE"
         private const val CHANNEL_ID = "jot_voice"
         private const val NOTIFICATION_ID = 100
         private const val READY_TONE_MS = 145
-        private const val CONTROLLER_TIMEOUT_MS = 15_000L
+        // Long enough for the companion to read a note and answer before Jot speaks again.
+        private const val CONTROLLER_TIMEOUT_MS = 75_000L
         private const val WAKE_LOCK_TIMEOUT_MS = 120_000L
         private const val WAKE_LOCK_RENEW_MS = 60_000L
         private val main = Handler(Looper.getMainLooper())

@@ -8,6 +8,7 @@ import java.util.Locale
 
 /** Everything Jot says out loud. Short, warm, and never a list of commands. */
 object JotLines {
+    const val ONE_SEC = "One sec."
     const val WHAT_SHOULD_IT_SAY = "No problem. What should it say?"
     const val IS_THAT_RIGHT = "Sorry, did I get that right?"
     const val MISSED_IT = "Sorry, I didn't catch that. One more time?"

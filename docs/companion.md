@@ -24,7 +24,7 @@ Android's DownloadManager fetches the file over unmetered networks only, into th
    - a question needs a question shape ("what", "where did I").
 3. Times come from `TimeParser`, never from the model.
 
-For spoken notes, `note` is the text as the user meant it: misheard words fixed, punctuation added. `CompanionText.fix` rejects a rewrite that strays too far from what was heard. Jot reads the fixed note back, so a bad fix is caught before anything happens. Voice sessions wait up to 10 seconds, then read back what was heard.
+For spoken notes, `note` is the text as the user meant it: misheard words fixed, punctuation added. `CompanionText.fix` rejects a rewrite that strays too far from what was heard. Jot reads the fixed note back, so a bad fix is caught before anything happens. If it takes more than two seconds Jot says "One sec.", and after 25 seconds it reads back what was heard. The voice service stays up while Jot thinks.
 
 ## Doing the actions
 

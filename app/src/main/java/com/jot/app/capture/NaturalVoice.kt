@@ -11,6 +11,7 @@ import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsSupertonicModelConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,11 +47,15 @@ internal class NaturalVoice(private val context: Context, private val scope: Cor
                 track.play()
                 var written = 0L
                 val started = SystemClock.elapsedRealtime()
-                tts.generateWithConfigAndCallback(text, generation()) { samples ->
-                    if (!coroutine.isActive) return@generateWithConfigAndCallback 0
-                    written += track.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING).coerceAtLeast(0)
-                    1
+                // The engine finds invoke([F)Integer by name over JNI, which a Kotlin lambda does not have.
+                val player = object : (FloatArray) -> Int {
+                    override fun invoke(samples: FloatArray): Int {
+                        if (!coroutine.isActive) return 0
+                        written += track.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING).coerceAtLeast(0)
+                        return 1
+                    }
                 }
+                tts.generateWithConfigAndCallback(text, generation(), player)
                 coroutine.ensureActive()
                 Log.i(TAG, "Generated ${written * 1000 / tts.sampleRate()} ms of speech in ${SystemClock.elapsedRealtime() - started} ms.")
                 track.stop()
@@ -60,6 +65,8 @@ internal class NaturalVoice(private val context: Context, private val scope: Cor
                     delay(DRAIN_POLL_MS)
                 }
                 true
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: IllegalStateException) {
                 Log.w(TAG, "Voice playback failed.", e); false
             } finally {
@@ -76,10 +83,10 @@ internal class NaturalVoice(private val context: Context, private val scope: Cor
 
     private fun generation(speaker: Int = SPEAKER) = GenerationConfig(sid = speaker, speed = SPEED, numSteps = STEPS, extra = mapOf("lang" to "en"))
 
+    /** A line may still be generating when the service stops, so the engine is freed after it finishes. */
     fun close() {
         idle?.cancel()
-        engine?.release()
-        engine = null
+        CoroutineScope(Dispatchers.Default).launch { lock.withLock { engine?.release(); engine = null } }
     }
 
     private fun rest() {

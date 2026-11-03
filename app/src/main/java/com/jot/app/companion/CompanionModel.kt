@@ -147,6 +147,7 @@ class CompanionModel(private val context: Context, private val scope: CoroutineS
                         reply.contents.contents.filterIsInstance<Content.Text>().joinToString("") { it.text }
                             .also {
                                 Log.i(TAG, "Companion replied in ${(System.nanoTime() - started) / 1_000_000} ms.")
+                                if (prefs.getString(KEY_BACKEND, null) == TRYING_GPU) prefs.edit().putString(KEY_BACKEND, "gpu").apply()
                                 if (Log.isLoggable(TAG, Log.DEBUG)) Log.d(TAG, "$input -> $it")
                             }
                     } finally { watchdog.cancel() }
@@ -157,15 +158,16 @@ class CompanionModel(private val context: Context, private val scope: CoroutineS
         }
     }
 
-    // The GPU attempt is recorded synchronously so a native crash during it falls back to CPU next launch.
+    // The GPU attempt is recorded synchronously and cleared by the first reply, so a native crash in
+    // loading or in that reply falls back to CPU next launch.
     @SuppressLint("ApplySharedPref")
     private fun engine(): Engine {
         engine?.let { return it }
         val cache = File(context.cacheDir, FOLDER).apply { mkdirs() }.path
         val gpu = Build.HARDWARE != "ranchu" && when (prefs.getString(KEY_BACKEND, null)) { "cpu", TRYING_GPU -> false; else -> true }
         if (gpu) {
-            prefs.edit().putString(KEY_BACKEND, TRYING_GPU).commit()
-            runCatching { load(Backend.GPU(), cache) }.onSuccess { prefs.edit().putString(KEY_BACKEND, "gpu").apply(); return it }
+            if (prefs.getString(KEY_BACKEND, null) != "gpu") prefs.edit().putString(KEY_BACKEND, TRYING_GPU).commit()
+            runCatching { load(Backend.GPU(), cache) }.onSuccess { return it }
                 .onFailure { Log.i(TAG, "Companion GPU is unavailable; using CPU.", it) }
         }
         return load(Backend.CPU(), cache).also { prefs.edit().putString(KEY_BACKEND, "cpu").apply() }

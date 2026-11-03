@@ -20,7 +20,8 @@ import java.time.*
 import java.lang.ref.WeakReference
 import java.util.UUID
 
-private const val VOICE_WAIT_MS = 10_000L
+private const val VOICE_WAIT_MS = 25_000L
+private const val ONE_SEC_AFTER_MS = 2_000L
 
 class JotController(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -362,7 +363,9 @@ class JotController(private val context: Context) {
                 if (companion.state.value != CompanionState.Ready) { ask(JotLines.readback(text)); return }
                 update { copy(thinking = true) }
                 launch {
+                    val filler = scope.launch { delay(ONE_SEC_AFTER_MS); VoiceService.send(context, VoiceService.SPEAK_HOLD, JotLines.ONE_SEC) }
                     val result = withTimeoutOrNull(VOICE_WAIT_MS) { pending.await() }
+                    filler.cancel()
                     if (state.value.stage != Stage.NOTE) return@launch
                     val unchanged = state.value.text == text
                     val heard = result?.note?.takeIf { unchanged } ?: state.value.text
