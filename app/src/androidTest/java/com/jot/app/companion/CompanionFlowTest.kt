@@ -114,7 +114,7 @@ class CompanionFlowTest {
         main { controller.newNote(voice = true, captureAlreadyRunning = true) }
         awaitState { controller.state.value.stage == Stage.CAPTURE && !controller.state.value.busy }
         VoiceSignals.emit(VoiceEvent.Utterance("text sam that im running ten minutes lake"))
-        awaitState { controller.state.value.stage == Stage.NOTE && !controller.state.value.thinking }
+        awaitState { controller.state.value.stage == Stage.ACTIONS && !controller.state.value.thinking }
         val text = controller.state.value.text
         assertTrue(text, text.contains("Sam") && text.contains("late") && !text.contains("lake"))
         main { controller.close() }

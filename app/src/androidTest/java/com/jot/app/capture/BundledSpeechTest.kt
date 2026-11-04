@@ -1,5 +1,14 @@
 package com.jot.app.capture
 
+import com.jot.app.core.CompanionText
+import com.jot.app.core.TimeParser
+import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineMoonshineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import org.junit.Assert.assertFalse
+import java.time.DayOfWeek
+import java.time.LocalTime
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.k2fsa.sherpa.onnx.*
@@ -34,20 +43,29 @@ class BundledSpeechTest {
         val audio = OfflineAudio(instrumentation.targetContext.assets)
         try {
             audio.hear({
-                FloatArray(640) { pcm.getOrElse(offset + it) { 0f } }.also { offset += 640 }
+                FloatArray(512) { pcm.getOrElse(offset + it) { 0f } }.also { offset += 512 }
             }, {}, {})
         } finally { audio.close() }
     }
 
     @Test fun noteAfterHeyJotKeepsItsFirstWords() {
         val text = heard("wake-then-note.wav")
-        assertTrue(text, text.contains("need to set an alarm"))
+        assertTrue(text, text.contains("need to set an alarm", ignoreCase = true))
         assertTrue(text, text.contains("school"))
     }
 
     @Test fun noteSaidInOneBreathWithHeyJotIsKept() {
         val text = heard("wake-one-breath.wav")
-        assertTrue(text, text.contains("an alarm for six fifty") && !text.contains("jot"))
+        assertTrue(text, text.contains("alarm", ignoreCase = true) && !text.contains("jot", ignoreCase = true))
+        assertEquals(text, LocalTime.of(6, 50), TimeParser.suggest(text).time)
+    }
+    @Test fun hesitationsLeaveACleanSentence() {
+        val text = heard("wake-hesitant.wav")
+        assertFalse(text, Regex("""\b(um|uh|ah)\b""", RegexOption.IGNORE_CASE).containsMatchIn(text))
+        assertEquals(text, LocalTime.of(6, 50), TimeParser.suggest(text).time)
+        assertEquals(text, DayOfWeek.entries.take(5), TimeParser.repeatDays(text))
+        assertTrue(text, CompanionText.ready(text))
+        assertTrue(text, text.contains("bus stop"))
     }
 
     @Test fun bundledKeywordModelRecognizesWakePhraseAndRejectsUnrelatedSpeech() {
@@ -81,13 +99,12 @@ class BundledSpeechTest {
         finally { model.release() }
     }
     @Test fun bundledSpeechModelTranscribesARecordedUtterance() {
-        val model = OnlineRecognizer(instrumentation.targetContext.assets, OnlineRecognizerConfig(modelConfig = config("asr")))
+        val moonshine = OfflineMoonshineModelConfig(encoder = "voice/asr/encoder_model.ort", mergedDecoder = "voice/asr/decoder_model_merged.ort")
+        val model = OfflineRecognizer(instrumentation.targetContext.assets, OfflineRecognizerConfig(modelConfig = OfflineModelConfig(moonshine = moonshine, tokens = "voice/asr/tokens.txt")))
         val stream = model.createStream()
         try {
             stream.acceptWaveform(samples("dictation.wav"), 16000)
-            stream.acceptWaveform(FloatArray(16000), 16000)
-            stream.inputFinished()
-            while (model.isReady(stream)) model.decode(stream)
+            model.decode(stream)
             val text = model.getResult(stream).text.uppercase()
             assertTrue(text, text.contains("YELLOW LAMPS"))
             assertTrue(text, text.contains("HERE AND THERE"))

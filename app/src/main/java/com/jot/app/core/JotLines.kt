@@ -20,6 +20,7 @@ object JotLines {
     const val WHAT_TIME = "What time? Morning or evening helps."
     const val NEW_MESSAGE = "Sure. What should the message say?"
     const val ALLOW_EXACT = "I need your okay to set exact reminders. Open Jot, or say approximate time."
+    const val WHO_TO = "Who should it go to?"
     const val ALLOW_NOTIFICATIONS = "I need your okay to send reminders. Open Jot to allow notifications."
 
     fun readback(note: String): String {
@@ -38,7 +39,8 @@ object JotLines {
             whenOf(kind)?.let { "$name $it" } ?: name
         }
         if (names.isEmpty()) return ""
-        return "Want me to add " + (if (names.size == 1) names[0] else names.dropLast(1).joinToString(", ") + " and " + names.last()) + "?"
+        val verb = if (actions == setOf(ActionKind.MESSAGE)) "send" else "add"
+        return "Want me to $verb " + (if (names.size == 1) names[0] else names.dropLast(1).joinToString(", ") + " and " + names.last()) + "?"
     }
 
     fun repeats(days: List<DayOfWeek>): String? = when {
@@ -49,7 +51,18 @@ object JotLines {
         else -> "every " + days.joinToString(" and ") { it.name.lowercase(Locale.ROOT).replaceFirstChar(Char::uppercase) }
     }
 
-    fun message(body: String) = "Here's what I've got: $body Sound good?"
+    fun addressed(recipient: String, body: String): String? {
+        val text = body.trim().trimEnd('.', '!', '?')
+        return listOfNotNull(recipient.takeIf { it.isNotBlank() }?.let { "to $it" }, text.takeIf { it.isNotEmpty() }?.let { "saying $it" })
+            .joinToString(" ").ifEmpty { null }
+    }
+
+    fun message(recipient: String, body: String) =
+        if (recipient.isBlank()) "Here's what I've got: $body Sound good?" else "Here's what I've got for $recipient: $body Sound good?"
+
+    fun whichOne(names: List<String>) = if (names.size < 2) WHO_TO else "Which one, " + names.take(3).joinToString(" or ") + "?"
+
+    fun noContact(name: String) = "I can't find $name in your contacts. Who should it go to?"
 
     fun finished(summary: String) = if (summary == "Saved" || summary == "Note saved") "Okay, it's saved." else "Done. $summary."
 

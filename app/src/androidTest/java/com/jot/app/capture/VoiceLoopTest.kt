@@ -15,7 +15,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 
-/** The whole live path: the real service records, a note arrives, and Jot speaks it back. */
+/** The whole live path: the real service records, an action is offered, and Jot speaks it back. */
 @RunWith(AndroidJUnit4::class)
 class VoiceLoopTest {
     private val instrument = InstrumentationRegistry.getInstrumentation()
@@ -48,7 +48,7 @@ class VoiceLoopTest {
             begin()
             await("recording") { VoiceSignals.state.value.capturing || VoiceSignals.state.value.listening }
             VoiceSignals.emit(VoiceEvent.Utterance("text sam that im running ten minutes lake"))
-            await("the note", 120_000) { controller.state.value.stage == Stage.NOTE && !controller.state.value.thinking }
+            await("the offer", 120_000) { controller.state.value.stage == Stage.ACTIONS && !controller.state.value.thinking }
             await("Jot to speak") { VoiceSignals.state.value.speaking }
             Log.i("JotVoiceLoop", "speaking: ${controller.state.value.text}")
             if (companion) assertTrue(controller.state.value.text, controller.state.value.text.contains("late") && !controller.state.value.text.contains("lake"))

@@ -110,7 +110,7 @@ internal fun formSummary(form: ActionForm, note: String): String? {
     val time = form.time?.let { DateFormat.getTimeFormat(context).format(Date.from(java.time.LocalDate.now().atTime(it).atZone(zone).toInstant())) }
     val date = form.date?.takeIf { form.kind != ActionKind.ALARM }?.let { DateFormat.getMediumDateFormat(context).format(Date.from(it.atStartOfDay(zone).toInstant())) }
     val title = form.body.trim().takeIf { it.isNotEmpty() }
-    if (form.kind == ActionKind.MESSAGE) return title
+    if (form.kind == ActionKind.MESSAGE) return listOfNotNull(form.recipient.takeIf { it.isNotBlank() }, title).joinToString(": ").ifEmpty { null }
     val repeat = JotLines.repeats(TimeParser.repeatDays(note)).takeIf { form.kind == ActionKind.ALARM }
     val whenText = listOfNotNull(date, time, repeat).joinToString(", ").ifEmpty { null }
     return listOfNotNull(if (form.kind == ActionKind.ALARM) whenText else title, if (form.kind == ActionKind.ALARM) title else whenText).joinToString(" · ").ifEmpty { null }
@@ -146,9 +146,8 @@ internal fun ActionDetails(state: JotUiState, callbacks: JotCallbacks) {
             value = form.recipient,
             onValueChange = { callbacks.onFormChanged(form.copy(recipient = it)) },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Phone number (optional)") },
+            label = { Text("To") },
             singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
             enabled = enabled,
         )
     } else {

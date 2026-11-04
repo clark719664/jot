@@ -7,18 +7,21 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.SystemClock
 import com.jot.app.core.MicGain
-import com.k2fsa.sherpa.onnx.EndpointConfig
-import com.k2fsa.sherpa.onnx.EndpointRule
+import com.jot.app.core.SpeechText
 import com.k2fsa.sherpa.onnx.KeywordSpotter
 import com.k2fsa.sherpa.onnx.KeywordSpotterConfig
+import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineMoonshineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
-import com.k2fsa.sherpa.onnx.OnlineRecognizer
-import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
+import com.k2fsa.sherpa.onnx.SileroVadModelConfig
+import com.k2fsa.sherpa.onnx.Vad
+import com.k2fsa.sherpa.onnx.VadModelConfig
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import java.util.Locale
 
 internal fun interface Frames {
     suspend fun next(): FloatArray
@@ -27,11 +30,12 @@ internal fun interface Frames {
 /** All calls run on the service's single audio worker. */
 internal class OfflineAudio(private val assets: AssetManager) {
     private var spotter: KeywordSpotter? = null
-    private var recognizer: OnlineRecognizer? = null
+    private var recognizer: OfflineRecognizer? = null
+    private var detector: Vad? = null
+    private var lastUsed = 0L
 
     /** Waits for Hey Jot, then keeps the same microphone open so nothing said after it is lost. */
     suspend fun listen(onListening: suspend () -> Unit, onWake: suspend () -> Unit, onRecording: suspend () -> Unit): String {
-        prepareRecognizer()
         prepareSpotter()
         currentCoroutineContext().ensureActive()
         return withMic { recorder ->
@@ -40,7 +44,7 @@ internal class OfflineAudio(private val assets: AssetManager) {
         }
     }
 
-    /** The microphone opens first: speech during the recognizer's first load waits in its buffer. */
+    /** The microphone opens first: speech during the recognizer's load waits in its buffer. */
     suspend fun capture(onRecording: suspend () -> Unit): String {
         currentCoroutineContext().ensureActive()
         return withMic { recorder ->
@@ -81,6 +85,7 @@ internal class OfflineAudio(private val assets: AssetManager) {
                         return recent.drop(((wakeEnd - oldest) / FRAME_SAMPLES).toInt().coerceAtLeast(0))
                     }
                 }
+                if (recognizer != null && SystemClock.elapsedRealtime() - lastUsed > RECOGNIZER_IDLE_MS) releaseRecognizer()
                 if (SystemClock.elapsedRealtime() >= resetAt) {
                     // A busy room may never produce the silence that resets the native stream.
                     val replacement = model.createStream()
@@ -95,30 +100,34 @@ internal class OfflineAudio(private val assets: AssetManager) {
         }
     }
 
-    private suspend fun transcribe(model: OnlineRecognizer, frames: Frames, head: List<FloatArray>): String {
+    /** Records until the speaker stops. Pauses and hesitations are part of the sentence, so only long silence ends it. */
+    private suspend fun transcribe(model: OfflineRecognizer, frames: Frames, head: List<FloatArray>): String {
         val coroutine = currentCoroutineContext()
+        val detector = prepareDetector().apply { reset() }
+        val audio = ArrayList(head)
+        head.forEach(detector::acceptWaveform)
+        var spokeAt = if (detector.isSpeechDetected() || !detector.empty()) 0 else -1
+        while (detector.empty() && audio.size < MAX_FRAMES) {
+            coroutine.ensureActive()
+            if (spokeAt < 0 && audio.size >= NO_SPEECH_FRAMES) return ""
+            val frame = frames.next().copyOf()
+            audio += frame
+            detector.acceptWaveform(frame)
+            if (spokeAt < 0 && detector.isSpeechDetected()) spokeAt = audio.size
+        }
+        if (spokeAt < 0) return ""
+        val ended = if (detector.empty()) audio.size else (audio.size - TRAILING_FRAMES).coerceAtLeast(1)
+        val kept = audio.subList((spokeAt - BEFORE_SPEECH_FRAMES).coerceIn(0, ended - 1), ended)
+        val samples = FloatArray(kept.sumOf { it.size })
+        var filled = 0
+        kept.forEach { it.copyInto(samples, filled); filled += it.size }
+        coroutine.ensureActive()
         val stream = model.createStream()
         try {
-            // Measured: this recognizer drops the first words of a stream without about 2 s of lead-in.
-            stream.acceptWaveform(FloatArray(SAMPLE_RATE * LEAD_IN_SECONDS), SAMPLE_RATE)
-            head.forEach { stream.acceptWaveform(it, SAMPLE_RATE) }
-            val deadline = SystemClock.elapsedRealtime() + CAPTURE_MS
-            while (SystemClock.elapsedRealtime() < deadline) {
-                coroutine.ensureActive()
-                while (model.isReady(stream)) {
-                    coroutine.ensureActive()
-                    model.decode(stream)
-                }
-                if (model.isEndpoint(stream)) break
-                stream.acceptWaveform(frames.next(), SAMPLE_RATE)
-            }
-            stream.acceptWaveform(FloatArray(SAMPLE_RATE / 3), SAMPLE_RATE)
-            stream.inputFinished()
-            while (model.isReady(stream)) {
-                coroutine.ensureActive()
-                model.decode(stream)
-            }
-            return model.getResult(stream).text.trim().lowercase(Locale.US)
+            stream.acceptWaveform(samples, SAMPLE_RATE)
+            model.decode(stream)
+            lastUsed = SystemClock.elapsedRealtime()
+            return SpeechText.tidy(model.getResult(stream).text)
         } finally {
             stream.release()
         }
@@ -141,25 +150,49 @@ internal class OfflineAudio(private val assets: AssetManager) {
         ),
     ).also { spotter = it }
 
-    private fun prepareRecognizer(): OnlineRecognizer = recognizer ?: OnlineRecognizer(
+    private fun prepareRecognizer(): OfflineRecognizer = recognizer ?: OfflineRecognizer(
         assets,
-        OnlineRecognizerConfig(
-            modelConfig = model("asr"),
-            endpointConfig = EndpointConfig(
-                rule1 = EndpointRule(false, 7f + LEAD_IN_SECONDS, 0f),
-                rule2 = EndpointRule(true, 1.25f, 0f),
-                rule3 = EndpointRule(false, 0f, CAPTURE_MS / 1_000f),
+        OfflineRecognizerConfig(
+            modelConfig = OfflineModelConfig(
+                moonshine = OfflineMoonshineModelConfig(
+                    encoder = "voice/asr/encoder_model.ort",
+                    mergedDecoder = "voice/asr/decoder_model_merged.ort",
+                ),
+                tokens = "voice/asr/tokens.txt",
+                numThreads = RECOGNIZER_THREADS,
             ),
         ),
-    ).also { recognizer = it }
+    ).also { recognizer = it; lastUsed = SystemClock.elapsedRealtime() }
+
+    private fun prepareDetector(): Vad = detector ?: Vad(
+        assets,
+        VadModelConfig(
+            sileroVadModelConfig = SileroVadModelConfig(
+                model = "voice/vad/silero_vad.onnx",
+                threshold = SPEECH_THRESHOLD,
+                minSilenceDuration = TRAILING_SILENCE_SECONDS,
+                minSpeechDuration = MIN_SPEECH_SECONDS,
+                windowSize = FRAME_SAMPLES,
+                maxSpeechDuration = (MAX_FRAMES * FRAME_SAMPLES / SAMPLE_RATE).toFloat() + 1f,
+            ),
+            sampleRate = SAMPLE_RATE,
+            numThreads = 1,
+        ),
+    ).also { detector = it }
+
+    private fun releaseRecognizer() {
+        recognizer?.release()
+        recognizer = null
+    }
 
     fun close() {
         try {
             spotter?.release()
+            detector?.release()
         } finally {
             spotter = null
-            recognizer?.release()
-            recognizer = null
+            detector = null
+            releaseRecognizer()
         }
     }
 
@@ -220,14 +253,22 @@ internal class OfflineAudio(private val assets: AssetManager) {
         const val WAKE_THRESHOLD = 0.1f
         const val WAKE_SCORE = 2f
         private const val SAMPLE_RATE = 16_000
-        private const val FRAME_SAMPLES = 640
-        private const val LEAD_IN_SECONDS = 2
-        private const val CARRY_OVER_FRAMES = 75
+        private const val FRAME_SAMPLES = 512
+        private const val CARRY_OVER_FRAMES = 94
+        private const val SPEECH_THRESHOLD = 0.4f
+        private const val MIN_SPEECH_SECONDS = 0.1f
+        private const val TRAILING_SILENCE_SECONDS = 1.6f
+        private const val FRAMES_PER_SECOND = SAMPLE_RATE / FRAME_SAMPLES
+        private const val TRAILING_FRAMES = FRAMES_PER_SECOND
+        private const val BEFORE_SPEECH_FRAMES = FRAMES_PER_SECOND
+        private const val NO_SPEECH_FRAMES = FRAMES_PER_SECOND * 7
+        private const val MAX_FRAMES = FRAMES_PER_SECOND * 35
+        private const val RECOGNIZER_THREADS = 4
+        private const val RECOGNIZER_IDLE_MS = 120_000L
         private const val WAKE_TAIL_SECONDS = 0.15f
         private const val MIC_BUFFER_SECONDS = 10
         private const val MIC_POLL_MS = 20L
         private const val MIC_TIMEOUT_MS = 2_000L
-        private const val CAPTURE_MS = 35_000L
         private const val WAKE_STREAM_MS = 120_000L
     }
 }

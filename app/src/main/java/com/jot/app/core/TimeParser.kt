@@ -31,12 +31,24 @@ object TimeParser {
     private val namedTime = Regex("""\b(?:at )?(noon|midnight)\b""")
     private val digitClock = Regex("""\b(at )?(\d{1,2})(?::(\d+))?(?: ?($meridiem))?\b(?!:)""")
     private val spokenHour = (units + "twenty(?: one| two| three)?").joinToString("|")
+    private val singleHour = units.subList(1, 10).joinToString("|")
+
+    // The recognizer writes numbers as digits and hears "for six fifty" as "4 6 50" or "4:650".
+    private val heardFor = Regex("""\b(?:4|four)(?::00)? +(?=(?:\d{1,2}(?::\d{2}| ?\d{2})? ?|(?:$singleHour)(?: $numberWords)? |(?:ten|eleven|twelve) $numberWords )$meridiem\b)""")
+    private val joinedFor = Regex("""\b4:(\d)(\d{2})\b""")
+    private val stackedFor = Regex("""\b4:(\d{1,2}:\d{2})\b""")
+    private val runTogether = Regex("""\b(\d{1,2}) ?(\d{2})(?= ?$meridiem\b)""")
     private val spokenClock = Regex("""\b(at )?($spokenHour)(?: (?:oh |o )?($numberWords|\d{1,2}))?(?: o['’]clock)?(?: ($meridiem))?\b""")
 
     fun suggest(text: String, now: ZonedDateTime = ZonedDateTime.now()): TimeSuggestion {
         val normalized = meridiemSpelling.replace(text.lowercase(Locale.ROOT)) { "${it.groupValues[1]}m" }
             .replace(Regex("""(?<=[a-z])-(?=[a-z])"""), " ")
+            .replace(',', ' ')
             .replace(Regex("""\s+"""), " ")
+            .replace(stackedFor, "$1")
+            .replace(joinedFor, "$1:$2")
+            .replace(heardFor, "")
+            .replace(runTogether, "$1:$2")
         relative.find(normalized)?.let { match ->
             val amount = parseNumber(match.groupValues[1])?.takeIf { it > 0 }
             if (amount != null) {
@@ -94,8 +106,8 @@ object TimeParser {
     fun repeatDays(text: String): List<DayOfWeek> {
         val value = text.lowercase(Locale.ROOT).replace(Regex("[^a-z ]"), " ").replace(Regex("\\s+"), " ")
         if (Regex("""\b(every ?day|daily|each day)\b""").containsMatchIn(value)) return DayOfWeek.entries
-        if (Regex("""\b(every weekday|weekdays)\b""").containsMatchIn(value)) return DayOfWeek.entries.take(5)
-        if (Regex("""\b(every weekend|weekends)\b""").containsMatchIn(value)) return DayOfWeek.entries.drop(5)
+        if (Regex("""\b(?:every|each)(?: [a-z]+)? week ?days?\b|\bweek ?days\b""").containsMatchIn(value)) return DayOfWeek.entries.take(5)
+        if (Regex("""\b(?:every|each)(?: [a-z]+)? week ?ends?\b|\bweek ?ends\b""").containsMatchIn(value)) return DayOfWeek.entries.drop(5)
         val days = weekdays.keys.joinToString("|")
         val listed = Regex("""\b(?:every|each) ((?:(?:$days)s?(?:,? and |,? )?)+)""").find(value)?.groupValues?.get(1) ?: return emptyList()
         return DayOfWeek.entries.filter { it.name.lowercase(Locale.ROOT) in listed }

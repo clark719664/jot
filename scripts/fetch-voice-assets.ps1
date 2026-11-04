@@ -47,15 +47,26 @@ $runtime = Get-PinnedAsset 'sherpa.aar' 'v2.0.1' 'sherpa-onnx-2.0.1.aar' 6787420
 $kws = 'sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01'
 $kwsHash = 'f170013b4716e41b62b9bfd809687c207cef798ef9bc6534d524e17af9b6561a'
 $kwsArchive = Get-PinnedAsset 'kws.tar.bz2' 'kws-models' "$kws.tar.bz2" 166405338 $kwsHash
-$asr = 'sherpa-onnx-streaming-zipformer-en-20M-2023-02-17'
-$asrHash = '9c559283e8498d3fe95913c79ca1cb454bb26281ac2b102b41306c7d752765d9'
-$asrArchive = Get-PinnedAsset 'asr.tar.bz2' 'asr-models' "$asr.tar.bz2" 143510207 $asrHash
+$asr = 'sherpa-onnx-moonshine-base-en-quantized-2026-02-27'
+$asrHash = '43232c1d13013d37317163baec3135bd771a186a4356f28c889bab453bb0e891'
+$asrArchive = Get-PinnedAsset 'moonshine.tar.bz2' 'asr-models' "$asr.tar.bz2" 363390510 $asrHash
+$vadHash = '9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6'
+$vad = Get-PinnedAsset 'silero_vad.onnx' 'asr-models' 'silero_vad.onnx' 271935959 $vadHash
 
 $libs = Join-Path $project 'app/libs'
 New-Item -ItemType Directory -Force $libs | Out-Null
 Copy-Item -LiteralPath $runtime -Destination (Join-Path $libs 'sherpa-onnx-2.0.1.aar') -Force
 Install-Model $kwsArchive $kws '-epoch-12-avg-2-chunk-16-left-64.int8.onnx' (Join-Path $assets 'kws')
-Install-Model $asrArchive $asr '-epoch-99-avg-1.int8.onnx' (Join-Path $assets 'asr')
+$asrFiles = 'encoder_model.ort', 'decoder_model_merged.ort', 'tokens.txt'
+tar -xf $asrArchive -C $staging @($asrFiles + 'LICENSE' | ForEach-Object { "$asr/$_" })
+if ($LASTEXITCODE -ne 0) { throw "Extracting $asr failed" }
+$asrTarget = Join-Path $assets 'asr'
+New-Item -ItemType Directory -Force $asrTarget | Out-Null
+foreach ($file in $asrFiles) { Copy-Item -LiteralPath (Join-Path $staging "$asr/$file") -Destination $asrTarget -Force }
+Copy-Item -LiteralPath (Join-Path $staging "$asr/LICENSE") -Destination (Join-Path $assets 'LICENSE-moonshine.txt') -Force
+$vadTarget = Join-Path $assets 'vad'
+New-Item -ItemType Directory -Force $vadTarget | Out-Null
+Copy-Item -LiteralPath $vad -Destination $vadTarget -Force
 
 $tts = 'sherpa-onnx-supertonic-3-tts-int8-2026-05-11'
 $ttsHash = '82fa96f91c4ef8abaae3a14a3f4153facf88bed821d1f7331cec2700f432c427'

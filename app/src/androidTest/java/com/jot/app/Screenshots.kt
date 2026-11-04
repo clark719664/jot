@@ -1,5 +1,9 @@
 package com.jot.app
 
+import android.content.ContentProviderOperation
+import android.provider.ContactsContract
+import android.provider.ContactsContract.CommonDataKinds.Phone
+import android.provider.ContactsContract.CommonDataKinds.StructuredName
 import android.graphics.Bitmap
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -54,6 +58,7 @@ class Screenshots {
             "Ideas for Mom's birthday: a scarf or the blue candle",
         ).mapIndexed { index, text -> NoteRecord("screens-$index", text, now - index * day, now - index * day) }
         seeded.forEach { store.saveNote(it) }
+        val sam = addContact("Sam Lee", "5550101")
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
                 shot("1-home")
@@ -84,7 +89,22 @@ class Screenshots {
         } finally {
             store.observeNotesSnapshot().filter { it.text.startsWith("Dinner with Ana") || it.text.startsWith("Text Sam") }.forEach { store.deleteNote(it.id) }
             seeded.forEach { store.deleteNote(it.id) }
+            withContacts { context.contentResolver.delete(ContactsContract.RawContacts.CONTENT_URI, "${ContactsContract.RawContacts._ID} = ?", arrayOf(sam.toString())) }
         }
+    }
+
+    private fun <T> withContacts(block: () -> T): T {
+        instrument.uiAutomation.adoptShellPermissionIdentity(android.Manifest.permission.WRITE_CONTACTS)
+        return try { block() } finally { instrument.uiAutomation.dropShellPermissionIdentity() }
+    }
+
+    private fun addContact(name: String, number: String): Long = withContacts {
+        val operations = arrayListOf(
+            ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI).withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, null).withValue(ContactsContract.RawContacts.ACCOUNT_NAME, null).build(),
+            ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI).withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0).withValue(ContactsContract.Data.MIMETYPE, StructuredName.CONTENT_ITEM_TYPE).withValue(StructuredName.DISPLAY_NAME, name).build(),
+            ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI).withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0).withValue(ContactsContract.Data.MIMETYPE, Phone.CONTENT_ITEM_TYPE).withValue(Phone.NUMBER, number).withValue(Phone.TYPE, Phone.TYPE_MOBILE).build(),
+        )
+        context.contentResolver.applyBatch(ContactsContract.AUTHORITY, operations)[0].uri!!.lastPathSegment!!.toLong()
     }
 
     private suspend fun JotStore.observeNotesSnapshot() = observeNotes().first().map { it.note }

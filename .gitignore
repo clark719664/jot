@@ -8,6 +8,7 @@ local.properties
 verification/
 app/libs/*.aar
 app/src/main/assets/voice/**/*.onnx
+app/src/main/assets/voice/**/*.ort
 app/src/main/assets/voice/**/tokens.txt
 app/src/main/assets/voice/tts/
 *.apk

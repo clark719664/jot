@@ -12,12 +12,15 @@ import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.AlarmClock
 import android.provider.CalendarContract
+import android.telephony.SmsManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.jot.app.MainActivity
 import com.jot.app.R
 import com.jot.app.core.TimeParser
@@ -34,9 +37,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 
 sealed class ScheduleResult {
     data class Scheduled(val exact: Boolean) : ScheduleResult()
@@ -117,11 +123,11 @@ class AndroidActions(context: Context, private val store: JotStore = JotStore.ge
         return ScheduleResult.Scheduled(exact)
     }
 
-    /** Adds the event straight to the primary writable calendar; false when that is not possible. */
-    fun addEvent(note: NoteRecord, action: ActionRecord): Boolean {
+    /** Adds the event straight to the primary writable calendar; null when that is not possible. */
+    fun addEvent(note: NoteRecord, action: ActionRecord): Uri? {
         val granted = listOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
             .all { app.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
-        if (!granted || action.kind != ActionKind.CALENDAR || note.draft) return false
+        if (!granted || action.kind != ActionKind.CALENDAR || note.draft) return null
         return runCatching {
             val start = futureStart(action)
             val end = action.endMillis?.takeIf { it > start } ?: Math.addExact(start, 30 * 60_000L)
@@ -129,7 +135,7 @@ class AndroidActions(context: Context, private val store: JotStore = JotStore.ge
             val writable = "${CalendarContract.Calendars.VISIBLE} = 1 AND ${CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL} >= ${CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR}"
             val order = "${CalendarContract.Calendars.IS_PRIMARY} DESC, ${CalendarContract.Calendars._ID} ASC"
             val calendar = app.contentResolver.query(calendars, arrayOf(CalendarContract.Calendars._ID), writable, null, order)
-                ?.use { if (it.moveToFirst()) it.getLong(0) else null } ?: return false
+                ?.use { if (it.moveToFirst()) it.getLong(0) else null } ?: return null
             val values = ContentValues().apply {
                 put(CalendarContract.Events.CALENDAR_ID, calendar)
                 put(CalendarContract.Events.TITLE, action.body?.takeIf { it.isNotBlank() } ?: note.text)
@@ -137,16 +143,51 @@ class AndroidActions(context: Context, private val store: JotStore = JotStore.ge
                 put(CalendarContract.Events.DTEND, end)
                 put(CalendarContract.Events.EVENT_TIMEZONE, ZoneId.systemDefault().id)
             }
-            app.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values) != null
-        }.getOrDefault(false)
+            app.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
+        }.getOrNull()
     }
+
+    fun canSend() = app.checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
+
+    /** Sends a text and reports what the carrier said: null when it has not answered yet. */
+    suspend fun send(number: String, text: String): Boolean? = withTimeoutOrNull(SEND_TIMEOUT_MS) {
+        suspendCancellableCoroutine { result ->
+            val sms = if (Build.VERSION.SDK_INT >= 31) app.getSystemService(SmsManager::class.java) else @Suppress("DEPRECATION") SmsManager.getDefault()
+            val parts = sms.divideMessage(text)
+            var waiting = parts.size
+            var delivered = true
+            val answer = "${app.packageName}.SENT.${System.nanoTime()}"
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    delivered = delivered && resultCode == Activity.RESULT_OK
+                    if (--waiting == 0) { app.unregisterReceiver(this); result.resume(delivered) }
+                }
+            }
+            ContextCompat.registerReceiver(app, receiver, IntentFilter(answer), ContextCompat.RECEIVER_NOT_EXPORTED)
+            result.invokeOnCancellation { runCatching { app.unregisterReceiver(receiver) } }
+            val sent = ArrayList(parts.indices.map { PendingIntent.getBroadcast(app, it, Intent(answer).setPackage(app.packageName), PendingIntent.FLAG_IMMUTABLE) })
+            runCatching { sms.sendMultipartTextMessage(number, null, parts, sent, null) }.onFailure {
+                Log.w(LOG_TAG, "The message could not be sent.", it)
+                runCatching { app.unregisterReceiver(receiver) }
+                result.resume(false)
+            }
+        }
+    }
+
+    fun alarmsView() = Intent(AlarmClock.ACTION_SHOW_ALARMS)
+
+    fun eventView(event: Uri, action: ActionRecord) = Intent(Intent.ACTION_VIEW, event)
+        .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, action.atMillis)
+        .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, action.endMillis)
+
+    fun conversationView(number: String) = Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", number, null))
 
     fun dispatch(activity: Activity, note: NoteRecord, action: ActionRecord): Result<ActionStatus> {
         return runCatching {
             require(action.noteId == note.id && !note.draft) { "Save the note before opening another app." }
             val text = action.body?.takeIf { it.isNotBlank() } ?: note.text
             val intent = when (action.kind) {
-                ActionKind.ALARM -> clockIntent(action, text, TimeParser.repeatDays(note.text))
+                ActionKind.ALARM -> clockIntent(action, action.body.orEmpty(), TimeParser.repeatDays(note.text))
                 ActionKind.CALENDAR -> calendarIntent(action, text)
                 ActionKind.MESSAGE -> messageIntent(action, text)
                 ActionKind.REMINDER -> error("Schedule this reminder in Jot.")
@@ -241,9 +282,9 @@ class AndroidActions(context: Context, private val store: JotStore = JotStore.ge
         return Intent(AlarmClock.ACTION_SET_ALARM)
             .putExtra(AlarmClock.EXTRA_HOUR, time.hour)
             .putExtra(AlarmClock.EXTRA_MINUTES, time.minute)
-            .putExtra(AlarmClock.EXTRA_MESSAGE, text)
             .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
             .also { intent ->
+                if (text.isNotBlank()) intent.putExtra(AlarmClock.EXTRA_MESSAGE, text)
                 // Calendar counts days from Sunday = 1.
                 if (repeat.isNotEmpty()) intent.putIntegerArrayListExtra(AlarmClock.EXTRA_DAYS, ArrayList(repeat.map { it.value % 7 + 1 }))
             }
@@ -261,9 +302,7 @@ class AndroidActions(context: Context, private val store: JotStore = JotStore.ge
 
     private fun messageIntent(action: ActionRecord, text: String): Intent {
         val recipient = action.recipient.orEmpty().trim()
-        require(recipient.isEmpty() || phoneInput.matches(recipient)) { "Enter a phone number." }
-        val number = recipient.filter { it in '0'..'9' || it == '+' }
-        require(recipient.isEmpty() || number.any { it in '0'..'9' }) { "Enter a phone number." }
+        val number = recipient.takeIf(phoneInput::matches).orEmpty().filter { it in '0'..'9' || it == '+' }
         return Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", number, null))
             .putExtra("sms_body", text)
     }
@@ -304,6 +343,7 @@ class AndroidActions(context: Context, private val store: JotStore = JotStore.ge
         private const val NOTIFICATION_ID = 1
         private val reminderLock = Mutex()
         private val phoneInput = Regex("""\+?[0-9() .-]+""")
+        private const val SEND_TIMEOUT_MS = 15_000L
     }
 }
 

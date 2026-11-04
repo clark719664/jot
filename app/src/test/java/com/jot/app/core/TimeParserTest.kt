@@ -13,6 +13,9 @@ class TimeParserTest {
         assertEquals(java.time.DayOfWeek.entries.take(5), TimeParser.repeatDays("alarm at 6 on weekdays"))
         assertEquals(listOf(java.time.DayOfWeek.MONDAY, java.time.DayOfWeek.FRIDAY), TimeParser.repeatDays("every Monday and Friday at 8 am"))
         assertEquals(emptyList<java.time.DayOfWeek>(), TimeParser.repeatDays("alarm for Monday at 8 am"))
+        assertEquals(java.time.DayOfWeek.entries.take(5), TimeParser.repeatDays("set an alarm for every yaw week day on for six fifty"))
+        assertEquals(java.time.DayOfWeek.entries.take(5), TimeParser.repeatDays("every week day"))
+        assertEquals(emptyList<java.time.DayOfWeek>(), TimeParser.repeatDays("it was a good weekday"))
         assertEquals("every day", JotLines.repeats(java.time.DayOfWeek.entries))
         assertEquals("every Monday and Friday", JotLines.repeats(listOf(java.time.DayOfWeek.MONDAY, java.time.DayOfWeek.FRIDAY)))
     }
@@ -82,6 +85,26 @@ class TimeParserTest {
             TimeSuggestion(LocalDate.of(2026, 11, 3)),
             TimeParser.suggest("tomorrow at 8:90 pm", now),
         )
+    }
+
+    @Test fun readsTimesTheWayTheRecognizerWritesThem() {
+        val morning = LocalTime.of(6, 50)
+        for (heard in listOf(
+            "an alarm for 6:50 a.m.", "for every weekday, 4:650 a.m., so I get up", "every weekday 4 6 50 am so I get up",
+            "every weekday, 4:6:50 am, so", "every weekday 4:00 6:50 a.m. so", "every weekday, a four, six fifty a M. So",
+            "every weekday, four, six, fifty a m. So", "alarm for 650 am", "alarm at 6 50 a.m.",
+        )) assertEquals(heard, morning, TimeParser.suggest(heard).time)
+        assertEquals(LocalTime.of(15, 0), TimeParser.suggest("Remind me tomorrow at 3 p.m.").time)
+        assertEquals(LocalTime.of(15, 0), TimeParser.suggest("Remind me tomorrow at 3:00 p.m.").time)
+        assertEquals(LocalTime.of(15, 0), TimeParser.suggest("Remind me tomorrow at, three P. M..").time)
+    }
+
+    @Test fun aRealFourOClockTimeStaysFourOClock() {
+        assertEquals(LocalTime.of(4, 10), TimeParser.suggest("alarm at 4:10 pm".replace("pm", "am")).time)
+        assertEquals(LocalTime.of(16, 30), TimeParser.suggest("meeting at 4:30 pm").time)
+        assertEquals(LocalTime.of(4, 30), TimeParser.suggest("alarm at four thirty a m").time)
+        assertEquals(LocalTime.of(16, 10), TimeParser.suggest("alarm at four ten pm").time)
+        assertEquals(LocalTime.of(16, 0), TimeParser.suggest("alarm at 4 pm").time)
     }
 
     @Test fun bareMinuteFormStaysAmbiguous() {

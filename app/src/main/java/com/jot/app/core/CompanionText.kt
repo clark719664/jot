@@ -23,7 +23,7 @@ data class Reading(
 object CompanionText {
     const val READ = """You are Jot, a voice notes app. Read what the user said and decide what to do with it. Spoken notes come from speech recognition, so some words may be misheard and punctuation is missing.
 Reply with JSON only: {"note":"","question":false,"actions":[],"title":"","message":""}
-note: the user's words as they meant them. A word that makes no sense where it is was misheard, so replace it with the similar-sounding word that fits. Add punctuation and capital letters, and write times like 3 PM. Change nothing else.
+note: the user's words as they meant them. A word that makes no sense where it is was misheard, so replace it with the similar-sounding word that fits. Leave out hesitations like um and uh and stray sounds from a pause. Add punctuation and capital letters, and write times like 3 PM. Change nothing else.
 question: true only when the user is asking about something they saved before, such as "what's the gate code" or "when is my dentist appointment". A note to save is false.
 actions: add only what the note asks for.
 "alarm": an alarm or waking up.
@@ -36,9 +36,9 @@ message: when "message" is chosen, the text to send to that person, written by t
 
     val examples = listOf(
         "tell mia im running a little lake" to """{"note":"Tell Mia I'm running a little late.","question":false,"actions":["message"],"title":"Running late","message":"Hi Mia, I'm running a little late."}""",
-        "lunch with priya next tuesday at new" to """{"note":"Lunch with Priya next Tuesday at noon.","question":false,"actions":["calendar"],"title":"Lunch with Priya","message":""}""",
+        "lunch with um priya next tuesday at new" to """{"note":"Lunch with Priya next Tuesday at noon.","question":false,"actions":["calendar"],"title":"Lunch with Priya","message":""}""",
         "game night saturday at eight tell leo to bring chips" to """{"note":"Game night Saturday at 8, tell Leo to bring chips.","question":false,"actions":["calendar","message"],"title":"Game night","message":"Hi Leo, can you bring chips to game night Saturday at 8?"}""",
-        "i need to by stamps on the weigh home" to """{"note":"I need to buy stamps on the way home.","question":false,"actions":[],"title":"Buy stamps","message":""}""",
+        "i need to by stamps fra on the weigh home" to """{"note":"I need to buy stamps on the way home.","question":false,"actions":[],"title":"Buy stamps","message":""}""",
         "whats the gate code" to """{"note":"What's the gate code?","question":true,"actions":[],"title":"Gate code","message":""}""",
     )
 
@@ -95,7 +95,7 @@ message: when "message" is chosen, the text to send to that person, written by t
         if (alarm) proposed += ActionKind.ALARM
         if (reminder) proposed += ActionKind.REMINDER
         if (event && ActionKind.REMINDER !in proposed && !alarm) proposed += ActionKind.CALENDAR
-        if (leadingMessageCue.containsMatchIn(text) && !reminder) proposed += ActionKind.MESSAGE
+        if (leadingMessageCue.containsMatchIn(text) && !reminder) { proposed.clear(); proposed += ActionKind.MESSAGE }
         val words = text.split(' ').count { it.isNotBlank() }
         val question = model != null && asks(note) && !reminder && !message && (model.question || words <= 8)
         return Reading(
@@ -105,6 +105,15 @@ message: when "message" is chosen, the text to send to that person, written by t
             message = model?.message?.takeIf { ActionKind.MESSAGE in proposed && it.isNotBlank() },
         )
     }
+
+    /** The rules alone can offer a timed alarm or reminder, or a text to someone Jot can name, so nobody waits on the model. */
+    fun ready(note: String, contacts: List<Contact> = emptyList(), now: ZonedDateTime = ZonedDateTime.now()): Boolean {
+        val text = normalize(note)
+        if (leadingMessageCue.containsMatchIn(text)) return ContactMatch.address(note, contacts)?.matches?.size == 1
+        return (alarmCue.containsMatchIn(text) || reminderCue.containsMatchIn(text)) && TimeParser.suggest(note, now).time != null
+    }
+
+    fun startsWithMessage(note: String) = leadingMessageCue.containsMatchIn(normalize(note))
 
     fun asks(text: String) = interrogative.containsMatchIn(normalize(text)) || text.trim().endsWith("?")
 

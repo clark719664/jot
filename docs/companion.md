@@ -24,11 +24,13 @@ Android's DownloadManager fetches the file over unmetered networks only, into th
    - a question needs a question shape ("what", "where did I").
 3. Times come from `TimeParser`, never from the model.
 
-For spoken notes, `note` is the text as the user meant it: misheard words fixed, punctuation added. `CompanionText.fix` rejects a rewrite that strays too far from what was heard. Jot reads the fixed note back, so a bad fix is caught before anything happens. A cold start can take half a minute, so Jot says "One sec." after two seconds and "Almost there." ten seconds later, and after 45 seconds it reads back what was heard. The voice service stays up while Jot thinks.
+For spoken notes, `note` is the text as the user meant it: misheard words fixed, punctuation added. `CompanionText.fix` rejects a rewrite that strays too far from what was heard. Jot reads the fixed note back, so a bad fix is caught before anything happens. The first reply after a cold start took 32 seconds on an emulator with 6 GB of memory, and later replies took 0.5 to 3 seconds. The engine unloads after two minutes idle, so a note spoken on its own is usually a cold start. Nothing the rules can settle waits for that: a timed alarm or reminder, or a text to one known contact, is offered at once. Otherwise Jot says "One sec." after two seconds and "Almost there." ten seconds later, and after 45 seconds it carries on with what was heard. A reply that lands later still fixes the note on screen. The model is stopped after 60 seconds.
 
 ## Doing the actions
 
-On confirm, each selected action runs if its details are complete, and only a gap opens a form: an alarm goes straight to Clock, an event straight into the primary writable calendar, a reminder into Android's alarm scheduler, and a message opens in Messages ready for you to pick a recipient and send. Without calendar access, Calendar opens filled in.
+A spoken request with an action skips the note review and goes straight to the offer, which already says what Jot heard. Yes acts on it, no starts the sentence again, and cancel throws it away.
+
+On confirm, each selected action runs if its details are complete, and only a gap opens a form: an alarm goes straight to Clock, an event straight into the primary writable calendar, a reminder into Android's alarm scheduler, and a message to the contact as a text. Jot then opens the alarm list, the event or the conversation. If two contacts fit, Jot asks which one. Without SMS access, Messages opens with the person and the words filled in. Without calendar access, Calendar opens filled in.
 
 A new note used for actions is marked `actionOnly`. It leaves the notes list once nothing is waiting on it, and stays searchable by the companion.
 

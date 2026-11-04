@@ -14,18 +14,26 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.runtime.getValue
 import com.jot.app.capture.*
 import com.jot.app.data.ActionKind
 import com.jot.app.platform.AndroidActions
 import com.jot.app.ui.*
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val controller get() = (application as JotApplication).controller
     private var pendingVoice: String? = null
     private var pendingContinue = false
+    private var askedToMessage = false
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        controller.contactsAllowed()
         val command = pendingVoice
         pendingVoice = null
         if (pendingContinue) { pendingContinue = false; controller.continueActions(this); return@registerForActivityResult }
@@ -61,6 +69,11 @@ class MainActivity : ComponentActivity() {
             }
         }
         openNotification(intent)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                controller.state.map { it.stage == Stage.ACTIONS && ActionKind.MESSAGE in it.selected }.distinctUntilChanged().collect { if (it) askToMessage() }
+            }
+        }
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); openNotification(intent) }
     private fun openNotification(intent: Intent?) { intent?.getStringExtra(AndroidActions.EXTRA_NOTE_ID)?.let(controller::openNote) }
@@ -73,7 +86,7 @@ class MainActivity : ComponentActivity() {
             else -> Unit
         }
     }
-    override fun onPause() { controller.detach(this); super.onPause() }
+    override fun onStop() { controller.detach(this); super.onStop() }
     private fun confirmActions() {
         val state = controller.state.value
         val calendar = arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
@@ -81,6 +94,12 @@ class MainActivity : ComponentActivity() {
             pendingContinue = true
             permissions.launch(calendar)
         } else controller.continueActions(this)
+    }
+    private fun askToMessage() {
+        val missing = arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.SEND_SMS).filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (askedToMessage || missing.isEmpty()) return
+        askedToMessage = true
+        permissions.launch(missing.toTypedArray())
     }
     private fun hasMicrophone() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     private fun beginVoice(command: String) {

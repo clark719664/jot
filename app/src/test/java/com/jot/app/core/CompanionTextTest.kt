@@ -129,9 +129,34 @@ class CompanionTextTest {
         assertEquals("Okay, it's saved.", JotLines.finished("Note saved"))
     }
 
+    @Test fun alarmsAndRemindersWithATimeNeedNoModel() {
+        assertTrue(CompanionText.ready("Go ahead and set an alarm for me for every weekday, for six fifty a M so I get up"))
+        assertTrue(CompanionText.ready("Remind me to call the dentist tomorrow at 3 p.m."))
+        assertFalse(CompanionText.ready("Set an alarm"))
+        assertFalse(CompanionText.ready("Dinner with Sam at 7 PM"))
+    }
+
+    @Test fun aTextToSomeoneJotKnowsNeedsNoModel() {
+        val book = listOf(Contact("Mia Rossi", "5551"), Contact("Sam Lee", "5552"), Contact("Sam Carter", "5553"))
+        assertTrue(CompanionText.ready("Text Mia that I'm late.", book))
+        assertFalse(CompanionText.ready("Text Sam that I'm late.", book))
+        assertFalse(CompanionText.ready("Text Priya that I'm late.", book))
+    }
+
+    @Test fun aLeadingTextIsOnlyAText() = assertEquals(
+        setOf(ActionKind.MESSAGE),
+        CompanionText.settle("Text Sam that dinner is at 7 PM.", Reading(actions = setOf(ActionKind.CALENDAR, ActionKind.MESSAGE))).actions,
+    )
+
+    @Test fun asksWhichContact() {
+        assertEquals("Who should it go to?", JotLines.whichOne(emptyList()))
+        assertEquals("Which one, Sam Lee or Sam Carter?", JotLines.whichOne(listOf("Sam Lee", "Sam Carter")))
+    }
+
     @Test fun offersActionsInOrder() {
         assertEquals("Want me to add a calendar event and a reminder?", JotLines.offer(setOf(ActionKind.REMINDER, ActionKind.CALENDAR)))
         assertEquals("Want me to add an alarm?", JotLines.offer(setOf(ActionKind.ALARM)))
+        assertEquals("Want me to send a message to Sam saying running late?", JotLines.offer(setOf(ActionKind.MESSAGE)) { JotLines.addressed("Sam", "Running late.".replaceFirstChar(Char::lowercase)) })
         assertEquals("", JotLines.offer(emptySet()))
     }
 }
