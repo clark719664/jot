@@ -32,6 +32,7 @@ data class JotUiState(
     val answer: String? = null,
     val sources: List<NoteItem> = emptyList(),
     val plan: Map<ActionKind, ActionForm> = emptyMap(),
+    val openWhenDone: Boolean = true,
 )
 data class JotCallbacks(
     val onNew: () -> Unit,
@@ -52,4 +53,5 @@ data class JotCallbacks(
     val onDismissMessage: () -> Unit,
     val onCompanionToggle: (Boolean) -> Unit,
     val onKeepQuestion: () -> Unit,
+    val onOpenWhenDone: (Boolean) -> Unit,
 )

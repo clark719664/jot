@@ -23,11 +23,13 @@ import java.util.UUID
 private const val VOICE_WAIT_MS = 45_000L
 private const val ONE_SEC_AFTER_MS = 2_000L
 private const val ALMOST_AFTER_MS = 10_000L
+private const val KEY_OPEN_WHEN_DONE = "open_when_done"
 
 class JotController(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val store = JotStore.get(context)
     private val androidActions = AndroidActions(context, store)
+    private val prefs = context.getSharedPreferences("jot", Context.MODE_PRIVATE)
     private val mutable = MutableStateFlow(JotUiState())
     val state: StateFlow<JotUiState> = mutable.asStateFlow()
     val notes = store.observeNotes().stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -37,6 +39,7 @@ class JotController(private val context: Context) {
     private var baseAction: ActionRecord? = null
     private var changingMessage = false
     private var choosingContact = false
+    private var filler: Job? = null
     private val contacts = Contacts(context)
     private var book = emptyList<Contact>()
     private var reveal: Intent? = null
@@ -142,7 +145,13 @@ class JotController(private val context: Context) {
         }.also { reading = it }
     }
 
-    private fun forget() { reading?.cancel(); reading = null; readingKeys.clear(); readingGeneration++; settled = null; touched = false }
+    // The model can't be interrupted, so the reading outlives a closed note. Its filler must not, or it talks over the next one.
+    private fun forget() { filler?.cancel(); reading?.cancel(); reading = null; readingKeys.clear(); readingGeneration++; settled = null; touched = false }
+
+    fun setOpenWhenDone(open: Boolean) {
+        prefs.edit().putBoolean(KEY_OPEN_WHEN_DONE, open).apply()
+        update { copy(openWhenDone = open) }
+    }
 
     private suspend fun loadContacts() { book = withContext(Dispatchers.IO) { contacts.all() } }
 
@@ -173,7 +182,7 @@ class JotController(private val context: Context) {
         }
         if (state.value.stage != Stage.ACTIONS || state.value.note?.id != note.id) return
         val plan = ActionKind.entries.associateWith { formFor(ActionRecord("", note.id, it), note) }
-        update { copy(thinking = false, selected = if (touched) selected else result.actions, plan = plan) }
+        update { copy(thinking = false, selected = if (touched) selected else result.actions, plan = plan, openWhenDone = prefs.getBoolean(KEY_OPEN_WHEN_DONE, true)) }
         val today = LocalDate.now()
         val repeat = JotLines.repeats(TimeParser.repeatDays(note.text))
         if (voice) ask(JotLines.offer(state.value.selected) { kind ->
@@ -192,7 +201,8 @@ class JotController(private val context: Context) {
         draftJob?.cancelAndJoin()
         formJob?.cancelAndJoin()
         if (before.form != null && before.note != null && baseAction?.status == ActionStatus.PENDING) store.saveAction(record(before.form, before.note.id, false))
-        if (before.note?.draft == true) store.deleteNote(before.note.id)
+        val offered = before.stage == Stage.ACTIONS && before.voiceSession && fresh && before.selected.isNotEmpty()
+        if (before.note?.draft == true || offered) before.note?.let { store.deleteNote(it.id) }
         queue.clear(); forget(); choosingContact = false; reveal = null; mutable.value = JotUiState()
         VoiceService.send(context, VoiceService.RESUME_WAKE)
     } }
@@ -256,7 +266,7 @@ class JotController(private val context: Context) {
         }
         val summary = done.joinToString(", ").lowercase().replaceFirstChar { it.uppercase() }.ifEmpty { "Saved" }
         auto = false; done.clear()
-        val destination = reveal
+        val destination = reveal.takeIf { prefs.getBoolean(KEY_OPEN_WHEN_DONE, true) }
         reveal = null
         finish(summary)
         destination?.let { intent -> host(activity)?.let { runCatching { it.startActivity(intent) } } }
@@ -434,12 +444,12 @@ class JotController(private val context: Context) {
                 if (companion.state.value != CompanionState.Ready) { review(text, CompanionText.settle(text, null).actions); return }
                 update { copy(thinking = true) }
                 launch {
-                    val filler = scope.launch {
+                    filler = scope.launch {
                         delay(ONE_SEC_AFTER_MS); VoiceService.send(context, VoiceService.SPEAK_HOLD, JotLines.ONE_SEC)
                         delay(ALMOST_AFTER_MS); VoiceService.send(context, VoiceService.SPEAK_HOLD, JotLines.ALMOST_THERE)
                     }
                     val result = withTimeoutOrNull(VOICE_WAIT_MS) { pending.await() }
-                    filler.cancel()
+                    filler?.cancel()
                     if (state.value.stage != Stage.NOTE) return@launch
                     val unchanged = state.value.text == text
                     val heard = result?.note?.takeIf { unchanged } ?: state.value.text

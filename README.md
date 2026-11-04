@@ -4,7 +4,7 @@ Voice notes that become alarms, events, reminders and messages.
 
 **[Download Jot.apk](https://github.com/clark719664/jot/releases/latest/download/Jot.apk)** · [clark719664.github.io/jot](https://clark719664.github.io/jot/)
 
-Say **Hey Jot** and keep talking, or tap the pen and type. Jot works out what you meant, fills in the details, and does it once you confirm: sets the alarm, adds the event, schedules the reminder, or texts the person. Then it takes you to the alarm, event or conversation it made. Ask about your notes and it answers. It talks back in a natural voice that runs on the phone.
+Say **Hey Jot** and keep talking, or tap the pen and type. Jot works out what you meant, fills in the details, and does it once you confirm: sets the alarm, adds the event, schedules the reminder, or texts the person. Then it opens the alarm, event or conversation it made, unless you uncheck **Open when done**. Ask about your notes and it answers. It talks back in a natural voice that runs on the phone.
 
 ## Install
 

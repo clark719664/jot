@@ -28,9 +28,9 @@ For spoken notes, `note` is the text as the user meant it: misheard words fixed,
 
 ## Doing the actions
 
-A spoken request with an action skips the note review and goes straight to the offer, which already says what Jot heard. Yes acts on it, no starts the sentence again, and cancel throws it away.
+A spoken request with an action skips the note review and goes straight to the offer, which already says what Jot heard. Yes acts on it, no starts the sentence again, and cancel or closing it throws it away.
 
-On confirm, each selected action runs if its details are complete, and only a gap opens a form: an alarm goes straight to Clock, an event straight into the primary writable calendar, a reminder into Android's alarm scheduler, and a message to the contact as a text. Jot then opens the alarm list, the event or the conversation. If two contacts fit, Jot asks which one. Without SMS access, Messages opens with the person and the words filled in. Without calendar access, Calendar opens filled in.
+On confirm, each selected action runs if its details are complete, and only a gap opens a form: an alarm goes straight to Clock, an event straight into the primary writable calendar, a reminder into Android's alarm scheduler, and a message to the contact as a text. Jot then opens the alarm list, the event or the conversation, unless **Open when done** is unchecked, which it remembers. If two contacts fit, Jot asks which one. Without SMS access, Messages opens with the person and the words filled in. Without calendar access, Calendar opens filled in.
 
 A new note used for actions is marked `actionOnly`. It leaves the notes list once nothing is waiting on it, and stays searchable by the companion.
 

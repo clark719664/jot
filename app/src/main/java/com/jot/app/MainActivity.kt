@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
                     onDismissMessage = controller::dismissMessage,
                     onCompanionToggle = controller::setCompanion,
                     onKeepQuestion = controller::keepQuestion,
+                    onOpenWhenDone = controller::setOpenWhenDone,
                 ))
             }
         }

@@ -136,6 +136,14 @@ class CompanionTextTest {
         assertFalse(CompanionText.ready("Dinner with Sam at 7 PM"))
     }
 
+    @Test fun clarksAlarmSentenceIsReadyAtOnce() {
+        for (heard in listOf("Set me an alarm at 6:50 a.m. For my kids to get them off for school.", "Set me an alarm at six fifty a M for my kids to get them off for school.", "Set me an alarm at 4:650 a.m. For my kids to get them off for school.")) {
+            assertTrue(heard, CompanionText.ready(heard))
+            assertEquals(heard, LocalTime.of(6, 50), TimeParser.suggest(heard).time)
+            assertEquals(heard, setOf(ActionKind.ALARM), CompanionText.settle(heard, null).actions)
+        }
+    }
+
     @Test fun aTextToSomeoneJotKnowsNeedsNoModel() {
         val book = listOf(Contact("Mia Rossi", "5551"), Contact("Sam Lee", "5552"), Contact("Sam Carter", "5553"))
         assertTrue(CompanionText.ready("Text Mia that I'm late.", book))

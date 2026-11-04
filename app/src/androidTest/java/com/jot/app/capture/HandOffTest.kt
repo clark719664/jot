@@ -10,11 +10,15 @@ import android.provider.ContactsContract
 import android.provider.ContactsContract.CommonDataKinds.Phone
 import android.provider.ContactsContract.CommonDataKinds.StructuredName
 import android.util.Log
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.jot.app.JotApplication
 import com.jot.app.MainActivity
+import com.jot.app.companion.CompanionState
 import com.jot.app.data.ActionKind
 import com.jot.app.ui.Stage
 import org.junit.After
@@ -23,12 +27,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeFalse
 import org.junit.Assume.assumeTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /** Spoken requests go straight to the action, and Jot lands in the app that holds the result. */
 @RunWith(AndroidJUnit4::class)
 class HandOffTest {
+    @get:Rule val compose = createEmptyComposeRule()
     private val instrument = InstrumentationRegistry.getInstrumentation()
     private val context = instrument.targetContext
     private val controller = (context.applicationContext as JotApplication).controller
@@ -64,6 +70,7 @@ class HandOffTest {
 
     @After fun cleanUp() {
         monitors.forEach(instrument::removeMonitor)
+        main { controller.setOpenWhenDone(true) }
         instrument.uiAutomation.adoptShellPermissionIdentity(android.Manifest.permission.WRITE_CONTACTS)
         added.forEach { context.contentResolver.delete(ContactsContract.RawContacts.CONTENT_URI, "${ContactsContract.RawContacts._ID} = ?", arrayOf(it.toString())) }
         instrument.uiAutomation.dropShellPermissionIdentity()
@@ -82,6 +89,7 @@ class HandOffTest {
     }
     private fun offered(timeout: Long = 90_000) { await("the offer", timeout) { controller.state.value.stage == Stage.ACTIONS && !controller.state.value.thinking } }
     private fun answer(words: String) {
+        await("Jot to speak") { VoiceSignals.state.value.speaking }
         await("Jot to finish and listen") { !VoiceSignals.state.value.speaking && VoiceSignals.state.value.capturing }
         VoiceSignals.emit(VoiceEvent.Utterance(words))
     }
@@ -98,6 +106,48 @@ class HandOffTest {
             assertEquals(1, set.hits)
             await("home") { controller.state.value.stage == Stage.HOME }
             assertEquals("Alarm set", controller.state.value.message)
+        }
+    }
+
+    @Test fun uncheckedStaysInJotAndIsRemembered() {
+        val set = watch(AlarmClock.ACTION_SET_ALARM)
+        val shown = watch(AlarmClock.ACTION_SHOW_ALARMS)
+        say("Set an alarm for 7 AM.") {
+            offered(timeout = 3_000)
+            compose.onNodeWithText("Open when done").performClick()
+            await("the choice") { !controller.state.value.openWhenDone }
+            answer("Yes.")
+            await("the alarm") { set.hits == 1 }
+            await("home") { controller.state.value.stage == Stage.HOME }
+            Thread.sleep(1_000)
+            assertEquals(0, shown.hits)
+        }
+        say("Set an alarm for 8 AM.") {
+            offered(timeout = 3_000)
+            assertEquals(false, controller.state.value.openWhenDone)
+        }
+    }
+
+    @Test fun closingASpokenOfferLeavesNoNote() {
+        say("Set an alarm for 9 AM.") {
+            offered(timeout = 3_000)
+            main { controller.close() }
+            await("home") { controller.state.value.stage == Stage.HOME && !controller.state.value.busy }
+            await("no note") { controller.notes.value.none { it.note.text.contains("9 AM") } }
+        }
+    }
+
+    @Test fun closingWhileThinkingLeavesNothingToSayLater() {
+        assumeTrue(controller.companion.state.value == CompanionState.Ready)
+        say("I need to pick up milk and eggs.") {
+            await("the reading") { controller.state.value.thinking }
+            main { controller.close() }
+            await("home") { controller.state.value.stage == Stage.HOME && !controller.state.value.busy }
+            val end = android.os.SystemClock.elapsedRealtime() + 14_000
+            while (android.os.SystemClock.elapsedRealtime() < end) {
+                assertEquals(false, VoiceSignals.state.value.speaking)
+                Thread.sleep(50)
+            }
         }
     }
 
@@ -175,6 +225,9 @@ class HandOffTest {
     }
 
     @Test fun aNoteWithoutAnActionStillReadsBack() {
-        say("Um.") { await("the question") { VoiceSignals.state.value.speaking || VoiceSignals.state.value.capturing } }
+        say("I need to pick up milk and eggs.") {
+            await("the note", 90_000) { controller.state.value.stage == Stage.NOTE && !controller.state.value.thinking }
+            await("Jot to speak") { VoiceSignals.state.value.speaking }
+        }
     }
 }

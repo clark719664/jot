@@ -602,6 +602,18 @@ private fun ActionChoices(state: JotUiState, callbacks: JotCallbacks) {
             if (kind != ActionKind.entries.last()) HorizontalDivider()
         }
     }
+    if (!state.thinking && state.selected.any { it != ActionKind.REMINDER }) {
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .toggleable(value = state.openWhenDone, enabled = !state.busy, role = Role.Checkbox, onValueChange = callbacks.onOpenWhenDone)
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Checkbox(checked = state.openWhenDone, onCheckedChange = null, enabled = !state.busy)
+            Text("Open when done", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
     PrimaryAction(
         if (state.selected.isEmpty()) "Done" else "Confirm",
         enabled = !state.busy,
