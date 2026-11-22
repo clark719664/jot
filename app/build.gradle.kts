@@ -1,7 +1,14 @@
+import java.net.URI
 import java.util.Properties
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose"); id("org.jetbrains.kotlin.kapt") }
 val signingFile = rootProject.file(".local/signing.properties")
 val signingValues = Properties().apply { if (signingFile.exists()) signingFile.inputStream().use(::load) }
+val relayBase = URI(providers.gradleProperty("jotRelayBaseUrl")
+    .getOrElse("https://jot-companion.clark719664.workers.dev"))
+require(relayBase.scheme == "https" && relayBase.host != null && relayBase.userInfo == null &&
+    relayBase.path.orEmpty() in listOf("", "/") && relayBase.query == null && relayBase.fragment == null) {
+    "jotRelayBaseUrl must be an HTTPS origin."
+}
 android {
     namespace = "com.jot.app"
     compileSdk = 35
@@ -9,8 +16,9 @@ android {
         applicationId = "com.clark.jot"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.2.1"
+        versionCode = 8
+        versionName = "1.3.0"
+        buildConfigField("String", "RELAY_ORIGIN", "\"${relayBase.resolve("/")}\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
@@ -25,7 +33,7 @@ android {
     buildTypes {
         release { isMinifyEnabled = false; if (signingFile.exists()) signingConfig = signingConfigs.getByName("personal") }
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     androidResources { noCompress += listOf("onnx", "ort") }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
@@ -46,7 +54,9 @@ dependencies {
     kapt("androidx.room:room-compiler:2.8.5")
     kapt("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.0")
+    implementation("com.google.code.gson:gson:2.11.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.stripe:paymentsheet:22.6.1")
     implementation(fileTree("libs") { include("*.aar") })
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")

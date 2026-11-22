@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.jot.app.capture.*
@@ -59,6 +60,7 @@ class JotController(private val context: Context) {
     private fun host(activity: Activity?) = (activity ?: foreground?.get())?.takeIf { !it.isFinishing && !it.isDestroyed }
 
     init {
+        scope.launch { companion.messages.collect { line -> update { copy(message = line) } } }
         scope.launch { VoiceSignals.events.collect { event ->
             when (event) {
                 is VoiceEvent.Utterance -> handleSpeech(event.text)
@@ -84,7 +86,6 @@ class JotController(private val context: Context) {
         draftJob?.cancel()
         state.value.note?.takeIf { it.draft && state.value.text.isNotBlank() }?.let { store.saveNote(it.copy(text = state.value.text, updatedAt = System.currentTimeMillis())) }
         queue.clear(); changingMessage = false; forget()
-        companion.warm()
         val now = System.currentTimeMillis()
         val note = NoteRecord(UUID.randomUUID().toString(), "", now, now, draft = true)
         store.saveNote(note)
@@ -115,16 +116,14 @@ class JotController(private val context: Context) {
             val text = before.text.trim()
             if (text.isEmpty()) { update { copy(error = "Enter a note.", busy = false) }; return@launch }
             draftJob?.cancelAndJoin()
-            if (note.draft && !before.voiceSession && companion.state.value == CompanionState.Ready && CompanionText.asks(text)) {
-                update { copy(thinking = true) }
-                val result = read(text).await()
-                if (state.value.note?.id != note.id || state.value.stage != Stage.NOTE) return@launch
-                if (result.question) { answer(text); return@launch }
-                update { copy(thinking = false) }
+            if (note.draft && !before.voiceSession && companion.state.value == CompanionState.Ready && CompanionText.asksAboutNotes(text)) {
+                answer(text)
+                return@launch
             }
             val saved = note.copy(text = text, updatedAt = System.currentTimeMillis(), draft = false)
             store.saveNote(saved)
             if (!note.draft) { finish("Saved"); return@launch }
+            if (!before.voiceSession && !CompanionText.canOfferAction(text)) { finish("Saved"); return@launch }
             fresh = true
             update { copy(note = saved, text = text, stage = Stage.ACTIONS, selected = emptySet(), busy = false, error = null, thinking = true) }
             suggest(saved, before.voiceSession)
@@ -145,7 +144,6 @@ class JotController(private val context: Context) {
         }.also { reading = it }
     }
 
-    // The model can't be interrupted, so the reading outlives a closed note. Its filler must not, or it talks over the next one.
     private fun forget() { filler?.cancel(); reading?.cancel(); reading = null; readingKeys.clear(); readingGeneration++; settled = null; touched = false }
 
     fun setOpenWhenDone(open: Boolean) {
@@ -174,13 +172,13 @@ class JotController(private val context: Context) {
     private suspend fun suggest(note: NoteRecord, voice: Boolean) {
         touched = false
         loadContacts()
-        val pending = read(note.text)
         val result = when {
             voice && CompanionText.ready(note.text, book) -> CompanionText.settle(note.text, null)
-            voice -> withTimeoutOrNull(VOICE_WAIT_MS) { pending.await() } ?: CompanionText.settle(note.text, null)
-            else -> pending.await()
+            voice -> withTimeoutOrNull(VOICE_WAIT_MS) { read(note.text).await() } ?: CompanionText.settle(note.text, null)
+            else -> read(note.text).await()
         }
         if (state.value.stage != Stage.ACTIONS || state.value.note?.id != note.id) return
+        if (fresh && !voice && !touched && result.actions.isEmpty()) { finish("Saved"); return }
         val plan = ActionKind.entries.associateWith { formFor(ActionRecord("", note.id, it), note) }
         update { copy(thinking = false, selected = if (touched) selected else result.actions, plan = plan, openWhenDone = prefs.getBoolean(KEY_OPEN_WHEN_DONE, true)) }
         val today = LocalDate.now()
@@ -260,7 +258,7 @@ class JotController(private val context: Context) {
                 if (ready != null && perform(note, ready, form, activity, approximate = false)) continue
                 if (state.value.stage == Stage.DETAILS && state.value.form?.id == form.id) return
             }
-            update { copy(stage = Stage.DETAILS, form = form, busy = false, error = null, permission = null, thinking = false) }
+            update { copy(stage = Stage.DETAILS, form = form, confirmingAction = auto, busy = false, error = null, permission = null, thinking = false) }
             if (state.value.voiceSession) promptForm()
             return
         }
@@ -336,7 +334,7 @@ class JotController(private val context: Context) {
     private suspend fun perform(note: NoteRecord, action: ActionRecord, form: ActionForm, activity: Activity?, approximate: Boolean): Boolean {
         val voice = state.value.voiceSession
         fun stop(permission: PermissionNeed? = null, error: String? = null): Boolean {
-            update { copy(stage = Stage.DETAILS, form = form, permission = permission, error = error, busy = false, thinking = false) }
+            update { copy(stage = Stage.DETAILS, form = form, confirmingAction = auto, permission = permission, error = error, busy = false, thinking = false) }
             return false
         }
         if (baseAction?.status != ActionStatus.SCHEDULED) store.saveAction(action)
@@ -439,9 +437,10 @@ class JotController(private val context: Context) {
         when (state.value.stage) {
             Stage.CAPTURE -> {
                 updateText(text); update { copy(stage = Stage.NOTE, voiceSession = true) }
-                val pending = read(text, spoken = true)
                 if (CompanionText.ready(text, book)) { confirm(); return }
                 if (companion.state.value != CompanionState.Ready) { review(text, CompanionText.settle(text, null).actions); return }
+                if (CompanionText.asksAboutNotes(text)) { launch { answer(text) }; return }
+                val pending = read(text, spoken = true)
                 update { copy(thinking = true) }
                 launch {
                     filler = scope.launch {
@@ -481,8 +480,10 @@ class JotController(private val context: Context) {
                 val actions = ConversationCommands.actions(text)
                 if (actions != null) { update { copy(selected = actions) }; continueActions(); return }
                 launch {
-                    val picked = companion.read(text)?.actions.orEmpty()
-                    if (state.value.stage != Stage.ACTIONS) return@launch
+                    val note = state.value.note ?: return@launch
+                    val proposal = companion.read(text)
+                    if (state.value.stage != Stage.ACTIONS || state.value.note?.id != note.id) return@launch
+                    val picked = CompanionText.settle(note.text, proposal).actions.intersect(proposal?.actions.orEmpty())
                     if (picked.isEmpty()) ask(JotLines.WHICH_ONE)
                     else { update { copy(selected = picked) }; continueActions() }
                 }
@@ -555,10 +556,10 @@ class JotController(private val context: Context) {
         update { copy(stage = Stage.ANSWER, note = null, text = question, thinking = true, busy = false, answer = null, sources = emptyList()) }
         val saved = store.remembered()
         val matches = CompanionText.relevant(question, saved.map { it.note }).map { it.id }
-        val context = saved.filter { it.note.id in matches }.sortedBy { matches.indexOf(it.note.id) }.ifEmpty { saved.take(10) }
+        val context = saved.filter { it.note.id in matches }.sortedBy { matches.indexOf(it.note.id) }
         val reply = if (context.isEmpty()) CompanionText.NO_ANSWER else companion.answer(question, context.map { it.note }) ?: CompanionText.NO_ANSWER
-        if (state.value.stage != Stage.ANSWER) return
-        val sources = if (reply == CompanionText.NO_ANSWER) emptyList() else context.filter { it.note.id in matches }.take(3)
+        if (state.value.stage != Stage.ANSWER || state.value.text != question) return
+        val sources = if (reply == CompanionText.NO_ANSWER) emptyList() else context.take(3)
         update { copy(thinking = false, answer = reply, sources = sources) }
         if (state.value.voiceSession) speak(reply)
     }
@@ -569,11 +570,27 @@ class JotController(private val context: Context) {
         update { copy(busy = true) }
         launch {
             val now = System.currentTimeMillis()
-            val note = NoteRecord(UUID.randomUUID().toString(), text, now, now, draft = true)
+            val note = NoteRecord(UUID.randomUUID().toString(), text, now, now)
             store.saveNote(note)
-            mutable.value = JotUiState(stage = Stage.NOTE, note = note, text = text)
+            finish("Saved")
         }
     }
 
-    fun setCompanion(enabled: Boolean) { if (enabled) companion.enable() else companion.disable() }
+    private fun openBrowser(activity: Activity, url: String): Boolean {
+        val current = host(activity) ?: return false
+        return try {
+            current.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE))
+            true
+        } catch (_: android.content.ActivityNotFoundException) { false }
+    }
+
+    fun signInCompanion(activity: Activity) = companion.startSignIn { openBrowser(activity, it) }
+    fun completeCompanionSignIn(uri: Uri?) {
+        if (uri == null || uri.scheme != "jot" || uri.encodedAuthority != "account" ||
+            uri.encodedPath != "/return" || uri.encodedQuery != null) return
+        val receipt = uri.encodedFragment ?: return
+        if (receipt.matches(Regex("[A-Za-z0-9_-]{43}"))) companion.completeSignIn(receipt)
+    }
+    fun cancelCompanionSignIn() = companion.cancelSignIn()
+    fun disconnectCompanion() = companion.disconnect()
 }

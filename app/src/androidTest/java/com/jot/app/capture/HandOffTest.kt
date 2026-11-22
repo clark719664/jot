@@ -61,6 +61,8 @@ class HandOffTest {
     }
 
     @Before fun people() {
+        assumeTrue("Pass -e liveCompanion 1 on a connected device, or disconnect for the offline tests.",
+            controller.companion.state.value != CompanionState.Ready || InstrumentationRegistry.getArguments().getString("liveCompanion") == "1")
         instrument.uiAutomation.adoptShellPermissionIdentity(android.Manifest.permission.WRITE_CONTACTS, android.Manifest.permission.READ_CONTACTS)
         addContact("Sam Lee", "5550101")
         addContact("Sam Carter", "5550102")
@@ -177,6 +179,7 @@ class HandOffTest {
             assertEquals("Dinner is at seven.", controller.state.value.plan.getValue(ActionKind.MESSAGE).body)
             answer("Yes.")
             await("the question") { controller.state.value.stage == Stage.DETAILS }
+            assertTrue(controller.state.value.confirmingAction)
             answer("Sam Carter.")
             await("the choice") { controller.state.value.form?.recipient == "Sam Carter" }
             answer("Yes.")

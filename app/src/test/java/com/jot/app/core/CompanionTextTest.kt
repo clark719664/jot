@@ -82,6 +82,20 @@ class CompanionTextTest {
         assertFalse(CompanionText.settle("What to get Mom for her birthday maybe a scarf or a nice candle", model(), now).question)
     }
 
+    @Test fun plainTypedNotesCanSkipActionSelection() {
+        assertFalse(CompanionText.canOfferAction("The garden has purple crocuses"))
+        assertFalse(CompanionText.canOfferAction("Buy milk eggs and bread"))
+        assertTrue(CompanionText.canOfferAction("Text Ada that I am already there"))
+        assertTrue(CompanionText.canOfferAction("Pick up the kids at 3:15 pm"))
+    }
+
+    @Test fun recallQuestionsCanGoStraightToSavedNotes() {
+        assertTrue(CompanionText.asksAboutNotes("Where did I park?"))
+        assertTrue(CompanionText.asksAboutNotes("wifi password?"))
+        assertFalse(CompanionText.asksAboutNotes("Can you remind me to buy milk?"))
+        assertFalse(CompanionText.asksAboutNotes("Text Maya are you at the station?"))
+    }
+
     @Test fun findsRelevantNotes() {
         val notes = listOf(
             NoteRecord("1", "The wifi password is maple 42", 1, 3),

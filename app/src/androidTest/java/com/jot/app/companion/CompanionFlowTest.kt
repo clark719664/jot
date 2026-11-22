@@ -22,7 +22,6 @@ import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class CompanionFlowTest {
@@ -49,10 +48,8 @@ class CompanionFlowTest {
     }
 
     @Before fun companionReady() {
-        val file = File(context.getExternalFilesDir(null), "companion/gemma-4-E2B-it.litertlm")
-        assumeTrue("Push the companion model to ${file.path} to run this test.", file.length() == CompanionModel.SIZE)
-        main { controller.setCompanion(true) }
-        awaitState(300_000) { controller.companion.state.value == CompanionState.Ready }
+        assumeTrue("Pass -e liveCompanion 1 to exercise the live relay.", InstrumentationRegistry.getArguments().getString("liveCompanion") == "1")
+        assumeTrue("Connect the companion on the test device first.", controller.companion.state.value == CompanionState.Ready)
     }
 
     @Test fun typedEventIsFilledInAndAddedToTheCalendar() = runBlocking {

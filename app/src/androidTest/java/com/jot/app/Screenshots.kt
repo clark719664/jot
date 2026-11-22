@@ -78,13 +78,16 @@ class Screenshots {
                 main { controller.close() }
                 awaitState { controller.state.value.stage == Stage.HOME && !controller.state.value.busy }
 
-                main { controller.newNote(voice = true, captureAlreadyRunning = true) }
-                awaitState { controller.state.value.stage == Stage.CAPTURE && !controller.state.value.busy }
-                VoiceSignals.emit(VoiceEvent.Utterance("whats the wifi password"))
-                awaitState { controller.state.value.stage == Stage.ANSWER && !controller.state.value.thinking }
-                shot("6-answer")
-                main { controller.close() }
-                awaitState { controller.state.value.stage == Stage.HOME && !controller.state.value.busy }
+                // An answer needs a signed-in companion: add `-e liveCompanion 1`.
+                if (InstrumentationRegistry.getArguments().getString("liveCompanion") != null) {
+                    main { controller.newNote(voice = true, captureAlreadyRunning = true) }
+                    awaitState { controller.state.value.stage == Stage.CAPTURE && !controller.state.value.busy }
+                    VoiceSignals.emit(VoiceEvent.Utterance("whats the wifi password"))
+                    awaitState { controller.state.value.stage == Stage.ANSWER && !controller.state.value.thinking }
+                    shot("6-answer")
+                    main { controller.close() }
+                    awaitState { controller.state.value.stage == Stage.HOME && !controller.state.value.busy }
+                }
             }
         } finally {
             store.observeNotesSnapshot().filter { it.text.startsWith("Dinner with Ana") || it.text.startsWith("Text Sam") }.forEach { store.deleteNote(it.id) }

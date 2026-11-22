@@ -170,10 +170,10 @@ internal fun ActionDetails(state: JotUiState, callbacks: JotCallbacks) {
     }
 
     val label = when (form.kind) {
-        ActionKind.ALARM -> "Open Clock"
-        ActionKind.CALENDAR -> "Open Calendar"
+        ActionKind.ALARM -> "Set alarm"
+        ActionKind.CALENDAR -> "Add event"
         ActionKind.REMINDER -> "Save reminder"
-        ActionKind.MESSAGE -> "Save draft"
+        ActionKind.MESSAGE -> if (state.confirmingAction) "Send message" else "Save draft"
     }
     PrimaryAction(label, enabled, Modifier.fillMaxWidth()) {
         focusManager.clearFocus()

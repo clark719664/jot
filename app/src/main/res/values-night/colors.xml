@@ -1,0 +1,5 @@
+<resources>
+    <color name="window_background">#000000</color>
+    <color name="jot_accent">#FFCF59</color>
+    <bool name="light_status_bar">false</bool>
+</resources>

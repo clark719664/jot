@@ -6,10 +6,7 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.jot.app.data.ActionKind
 import com.jot.app.data.NoteRecord
-import java.time.Instant
-import java.time.ZoneId
 import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 data class Reading(
@@ -21,28 +18,6 @@ data class Reading(
 )
 
 object CompanionText {
-    const val READ = """You are Jot, a voice notes app. Read what the user said and decide what to do with it. Spoken notes come from speech recognition, so some words may be misheard and punctuation is missing.
-Reply with JSON only: {"note":"","question":false,"actions":[],"title":"","message":""}
-note: the user's words as they meant them. A word that makes no sense where it is was misheard, so replace it with the similar-sounding word that fits. Leave out hesitations like um and uh and stray sounds from a pause. Add punctuation and capital letters, and write times like 3 PM. Change nothing else.
-question: true only when the user is asking about something they saved before, such as "what's the gate code" or "when is my dentist appointment". A note to save is false.
-actions: add only what the note asks for.
-"alarm": an alarm or waking up.
-"calendar": an appointment, meeting, class, dinner or other event.
-"reminder": something to do later, such as remind me, pick up, call or pay.
-"message": telling, texting or asking someone something.
-Lists, ideas and facts get no actions.
-title: 2 to 5 words naming the main event or task, keeping names of people and places, with no times or dates.
-message: when "message" is chosen, the text to send to that person, written by the user in first person; otherwise empty."""
-
-    val examples = listOf(
-        "tell mia im running a little lake" to """{"note":"Tell Mia I'm running a little late.","question":false,"actions":["message"],"title":"Running late","message":"Hi Mia, I'm running a little late."}""",
-        "lunch with um priya next tuesday at new" to """{"note":"Lunch with Priya next Tuesday at noon.","question":false,"actions":["calendar"],"title":"Lunch with Priya","message":""}""",
-        "game night saturday at eight tell leo to bring chips" to """{"note":"Game night Saturday at 8, tell Leo to bring chips.","question":false,"actions":["calendar","message"],"title":"Game night","message":"Hi Leo, can you bring chips to game night Saturday at 8?"}""",
-        "i need to by stamps fra on the weigh home" to """{"note":"I need to buy stamps on the way home.","question":false,"actions":[],"title":"Buy stamps","message":""}""",
-        "whats the gate code" to """{"note":"What's the gate code?","question":true,"actions":[],"title":"Gate code","message":""}""",
-    )
-
-    const val ANSWER = """You are Jot. Answer the user's question using only their notes below. Reply in one short spoken sentence. If the notes do not answer it, reply exactly: I don't have a note about that."""
     const val NO_ANSWER = "I don't have a note about that."
 
     private val alarmCue = Regex("""\b(alarm|wake me|wake up)\b""")
@@ -106,6 +81,10 @@ message: when "message" is chosen, the text to send to that person, written by t
         )
     }
 
+    /** Could any model proposal pass the local action checks for these words? */
+    fun canOfferAction(note: String): Boolean =
+        settle(note, Reading(actions = ActionKind.entries.toSet())).actions.isNotEmpty()
+
     /** The rules alone can offer a timed alarm or reminder, or a text to someone Jot can name, so nobody waits on the model. */
     fun ready(note: String, contacts: List<Contact> = emptyList(), now: ZonedDateTime = ZonedDateTime.now()): Boolean {
         val text = normalize(note)
@@ -116,6 +95,11 @@ message: when "message" is chosen, the text to send to that person, written by t
     fun startsWithMessage(note: String) = leadingMessageCue.containsMatchIn(normalize(note))
 
     fun asks(text: String) = interrogative.containsMatchIn(normalize(text)) || text.trim().endsWith("?")
+
+    fun asksAboutNotes(note: String): Boolean {
+        val text = normalize(note)
+        return asks(note) && !reminderCue.containsMatchIn(text) && !messageCue.containsMatchIn(text)
+    }
 
     /** The model's cleaned-up note, or what was heard when the rewrite strays too far from it. */
     fun fix(heard: String, proposed: String?): String {
@@ -136,12 +120,6 @@ message: when "message" is chosen, the text to send to that person, written by t
             .filter { it.second > 0 }
             .sortedWith(compareByDescending<Pair<NoteRecord, Int>> { it.second }.thenByDescending { it.first.updatedAt })
             .take(limit).map { it.first }.toList()
-    }
-
-    fun notesContext(notes: List<NoteRecord>, zone: ZoneId = ZoneId.systemDefault()): String {
-        val format = DateTimeFormatter.ofPattern("MMM d", Locale.US)
-        val lines = notes.joinToString("\n") { "- (${Instant.ofEpochMilli(it.updatedAt).atZone(zone).format(format)}) ${it.text.replace('\n', ' ')}" }
-        return "$ANSWER\n\nNotes:\n$lines"
     }
 
     private fun normalize(text: String) = text.lowercase(Locale.ROOT).replace('’', '\'').replace(Regex("[^a-z0-9' :]"), " ").replace(Regex("\\s+"), " ").trim()

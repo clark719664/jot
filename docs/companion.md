@@ -1,61 +1,38 @@
 # Companion
 
-The companion is an optional on-device language model. It cleans up what was heard, suggests actions, writes titles and message drafts, and answers questions about saved notes.
+The optional AI companion cleans up dictation, suggests actions, drafts titles and messages, and answers questions about saved notes. Writing, offline speech recognition and local actions are free and ad-free, with no account required.
 
-## Model
+## Connect
 
-- **Gemma 4 E2B instruction-tuned**, LiteRT-LM format, from [litert-community/gemma-4-E2B-it-litert-lm](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm) (Apache-2.0).
-- Pinned to revision `c658da437244f072bf2f1cabc916b60d66d97663`, file `gemma-4-E2B-it.litertlm`, 2,588,147,712 bytes, SHA-256 `181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c`.
-- Runtime: [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM) `0.19.0` (Apache-2.0). GPU first, CPU fallback; emulators use CPU.
+Tap ✦ to open Jot account signup or sign-in in your browser. Use a passkey, then return to Jot. Each signed-in device has its own revocable credential, encrypted with a key in Android Keystore. The relay calls OpenAI’s `gpt-6-luna` on the standard tier with no tools. The OpenAI API key stays on the relay.
 
-Chosen over Qwen3 0.6B/1.7B and Qwen3.5 0.8B/2B after scoring all five on the same note set: Gemma got 9 of 10 right, the next best 8.
+## What gets sent
 
-## Download
+- To interpret a note, Jot sends its text, including any names or numbers you typed or dictated.
+- To answer a question about saved notes, Jot checks for keyword matches on the phone. If it finds any, the relay sends the question with excerpts and dates from matching notes to OpenAI.
+- Audio processing and address book lookups happen on the phone. Jot handles alarms, events, reminders and texts locally after you confirm.
+- The relay tracks account and device access, plan status and usage. If you subscribe, Stripe collects billing details through its native PaymentSheet inside Jot and reports subscription status to the relay.
 
-Android's DownloadManager fetches the file over unmetered networks only, into the app's external files folder, with a system notification. Jot checks size and SHA-256, then marks it ready. A failed check deletes the file. Turning the companion off cancels the download or deletes the model.
+## Plans and limits
+
+The free plan includes five AI calls per day. All devices signed in to the same account share that allowance, which resets at midnight UTC. The $4.99/month plan includes 100 calls per day. Once billing is configured, you can subscribe in Jot. Canceling renewal in the app keeps paid access until the end of the billing period. You can resume renewal before then. Your bank may ask you to verify a payment outside the app.
+
+Both plans are subject to abuse controls and the same $70 ceiling for all OpenAI requests sent through Jot’s relay in a UTC calendar month. Before sending a request, the relay reserves its maximum possible charge and releases the unused amount when OpenAI returns usage. A request OpenAI rejects releases its reservation. An uncertain charge stays reserved through the following month. If the next request would exceed the available budget, Jot’s local features still work.
 
 ## How a note is read
 
-1. The note goes to the model with a short instruction and five worked examples. It replies with `{"note","question","actions","title","message"}`.
-2. `CompanionText.settle` merges that reply with plain rules:
-   - alarm, calendar and reminder need a time in the note or an explicit cue ("remind me", "wake me");
-   - a message needs someone to tell, text or ask;
-   - obvious cues add actions the model missed;
-   - a question needs a question shape ("what", "where did I").
-3. Times come from `TimeParser`, never from the model.
+The model can propose a corrected note, actions, a title and a message. `CompanionText.settle` checks the proposals against local rules. An alarm, event or reminder needs a time or an explicit cue such as “wake me.” A message needs someone to tell, text or ask. `TimeParser` extracts times from the confirmed note.
 
-For spoken notes, `note` is the text as the user meant it: misheard words fixed, punctuation added. `CompanionText.fix` rejects a rewrite that strays too far from what was heard. Jot reads the fixed note back, so a bad fix is caught before anything happens. The first reply after a cold start took 32 seconds on an emulator with 6 GB of memory, and later replies took 0.5 to 3 seconds. The engine unloads after two minutes idle, so a note spoken on its own is usually a cold start. Nothing the rules can settle waits for that: a timed alarm or reminder, or a text to one known contact, is offered at once. Otherwise Jot says "One sec." after two seconds and "Almost there." ten seconds later, and after 45 seconds it carries on with what was heard. A reply that lands later still fixes the note on screen. The model is stopped after 60 seconds.
+For spoken notes, `CompanionText.fix` rejects a rewrite that strays too far from what was heard. Jot reads the note back for confirmation. A timed alarm or reminder, or a text to one known contact, can be offered from local rules.
 
 ## Doing the actions
 
 A spoken request with an action skips the note review and goes straight to the offer, which already says what Jot heard. Yes acts on it, no starts the sentence again, and cancel or closing it throws it away.
 
-On confirm, each selected action runs if its details are complete, and only a gap opens a form: an alarm goes straight to Clock, an event straight into the primary writable calendar, a reminder into Android's alarm scheduler, and a message to the contact as a text. Jot then opens the alarm list, the event or the conversation, unless **Open when done** is unchecked, which it remembers. If two contacts fit, Jot asks which one. Without SMS access, Messages opens with the person and the words filled in. Without calendar access, Calendar opens filled in.
+When you confirm, each selected action runs if its details are complete. An alarm goes to Clock, an event into the primary writable calendar, a reminder into Android's alarm scheduler, and a message to the contact as a text. Jot then opens the alarm list, event or conversation unless you uncheck **Open when done**. If two contacts fit, Jot asks which one. Without SMS or calendar access, Jot opens Messages or Calendar with the details filled in.
 
 A new note used for actions is marked `actionOnly`. It leaves the notes list once nothing is waiting on it, and stays searchable by the companion.
 
 ## Answers
 
-A spoken or typed question is matched against saved notes by keyword. The best matches go to the model with an instruction to answer in one sentence from those notes only, or say it has no note about that. The matching notes show under the answer. **Save as note** keeps the question as a note instead.
-
-## Speed
-
-On an Android 16 x86_64 emulator (4 cores, CPU): load 1.5–2.6 s, reading a note 2–6 s, answering about 1 s. The engine unloads after two idle minutes.
-
-## Debugging
-
-```sh
-adb shell setprop log.tag.JotCompanion DEBUG   # log every prompt and reply
-adb logcat -s JotCompanion
-```
-
-To skip the download on a test device, push the model and give it to the app (rooted emulator):
-
-```sh
-adb root
-adb shell mkdir -p /storage/emulated/0/Android/data/com.clark.jot/files/companion
-adb push gemma-4-E2B-it.litertlm /storage/emulated/0/Android/data/com.clark.jot/files/companion/
-adb shell chown -R $(adb shell stat -c %U /storage/emulated/0/Android/data/com.clark.jot):ext_data_rw /storage/emulated/0/Android/data/com.clark.jot
-```
-
-`CompanionModelTest` and `CompanionFlowTest` run when the file is present.
+The model is asked to answer in one sentence using the supplied notes. Matching notes appear under the answer. If nothing matches, Jot says so locally. **Save as note** keeps the question as a note instead.

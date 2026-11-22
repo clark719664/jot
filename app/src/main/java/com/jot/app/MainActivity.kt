@@ -11,6 +11,7 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.jot.app.billing.NativeBilling
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -45,14 +46,17 @@ class MainActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val billing = NativeBilling(this, controller.companion, controller::notice)
         enableEdgeToEdge()
         setContent {
             val notes by controller.notes.collectAsStateWithLifecycle()
             val state by controller.state.collectAsStateWithLifecycle()
             val voice by VoiceSignals.state.collectAsStateWithLifecycle()
             val companion by controller.companion.state.collectAsStateWithLifecycle()
+            val account by controller.companion.account.collectAsStateWithLifecycle()
+            val billingBusy by billing.busy.collectAsStateWithLifecycle()
             JotTheme {
-                JotScreen(notes, state, voice, companion, JotCallbacks(
+                JotScreen(notes, state, voice, companion, account, billingBusy, JotCallbacks(
                     onNew = { controller.newNote() }, onOpen = controller::open,
                     onTextChanged = controller::updateText, onConfirm = controller::confirm,
                     onClose = controller::close, onToggleAction = controller::toggleAction,
@@ -63,29 +67,46 @@ class MainActivity : ComponentActivity() {
                     onMic = { beginVoice(VoiceService.CAPTURE) },
                     onWakeToggle = { enabled -> if (enabled) beginVoice(VoiceService.START_WAKE) else VoiceService.send(this, VoiceService.STOP) },
                     onDismissMessage = controller::dismissMessage,
-                    onCompanionToggle = controller::setCompanion,
+                    onSignInCompanion = { controller.signInCompanion(this) },
+                    onCancelSignIn = controller::cancelCompanionSignIn,
+                    onPurchase = billing::purchase,
+                    onSetRenewal = billing::setRenewal,
+                    onRefreshCompanion = controller.companion::refreshAccount,
+                    onDisconnectCompanion = controller::disconnectCompanion,
                     onKeepQuestion = controller::keepQuestion,
                     onOpenWhenDone = controller::setOpenWhenDone,
                 ))
             }
         }
-        openNotification(intent)
+        handleIntent(intent)
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 controller.state.map { it.stage == Stage.ACTIONS && ActionKind.MESSAGE in it.selected }.distinctUntilChanged().collect { if (it) askToMessage() }
             }
         }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); openNotification(intent) }
-    private fun openNotification(intent: Intent?) { intent?.getStringExtra(AndroidActions.EXTRA_NOTE_ID)?.let(controller::openNote) }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+    private fun handleIntent(intent: Intent?) {
+        controller.completeCompanionSignIn(intent?.data)
+        intent?.getStringExtra(AndroidActions.EXTRA_NOTE_ID)?.let(controller::openNote)
+    }
     override fun onResume() {
         super.onResume()
         controller.attach(this)
+        controller.companion.setForeground(true)
         when (controller.state.value.permission) {
             PermissionNeed.EXACT_ALARMS -> if (Build.VERSION.SDK_INT < 31 || getSystemService(AlarmManager::class.java).canScheduleExactAlarms()) controller.saveAction(this)
             PermissionNeed.NOTIFICATIONS -> if (NotificationManagerCompat.from(this).areNotificationsEnabled()) controller.saveAction(this)
             else -> Unit
         }
+    }
+    override fun onPause() {
+        controller.companion.setForeground(false)
+        super.onPause()
     }
     override fun onStop() { controller.detach(this); super.onStop() }
     private fun confirmActions() {

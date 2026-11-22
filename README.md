@@ -4,7 +4,7 @@ Voice notes that become alarms, events, reminders and messages.
 
 **[Download Jot.apk](https://github.com/clark719664/jot/releases/latest/download/Jot.apk)** · [clark719664.github.io/jot](https://clark719664.github.io/jot/)
 
-Say **Hey Jot** and keep talking, or tap the pen and type. Jot works out what you meant, fills in the details, and does it once you confirm: sets the alarm, adds the event, schedules the reminder, or texts the person. Then it opens the alarm, event or conversation it made, unless you uncheck **Open when done**. Ask about your notes and it answers. It talks back in a natural voice that runs on the phone.
+Say **Hey Jot** and keep talking, or tap the pen and type. Jot fills in the details and acts once you confirm. It can set an alarm, add an event, schedule a reminder or send a text. Then it opens the alarm, event or conversation it made, unless you uncheck **Open when done**. Its voice runs on the phone. The optional companion can answer questions about your notes.
 
 ## Install
 
@@ -16,18 +16,17 @@ Allow contacts so Jot can find who you mean, and SMS so it can send. Android may
 
 ## Companion
 
-Tap ✦ to download the companion: [Gemma 4 E2B](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm), 2.6 GB over Wi-Fi, running on the phone with [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM). With it, Jot:
+Writing, dictation and local actions are free and ad-free. To use the optional AI companion, tap ✦, create an account or sign in with a passkey in your browser, then return to Jot. The companion can
 
-- fixes misheard words and reads the fixed note back,
-- picks the actions a note asks for,
-- titles events and reminders, and writes messages for you to confirm,
-- answers questions about your notes, spoken or typed: *"What's the wifi password?"*
+- fix misheard words and read the corrected note back,
+- suggest actions, title events and reminders, and draft messages for you to confirm,
+- answer spoken or typed questions such as *“What's the Wi-Fi password?”*
 
-Without it, Jot still suggests actions from plain cues such as "remind me" or "wake me". Tap ✦ again to remove it. How it works: [docs/companion.md](docs/companion.md).
+The free account includes five AI calls per day across all your devices, resetting at midnight UTC. When billing is available, you can subscribe in Jot for $4.99/month to raise the daily allowance to 100 calls. You can cancel or resume renewal in the app. Both plans share the service’s $70 monthly AI budget and are subject to abuse controls. Typing, dictation and action cues such as “remind me” work offline. [Companion details](docs/companion.md)
 
 ## Privacy
 
-Notes, audio and the companion stay on the phone. The only network request is the companion download from Hugging Face, checked against a pinned SHA-256. No accounts, ads or analytics, and no cloud backup: uninstalling deletes your notes.
+Jot stores notes on your phone and processes microphone audio there. When you use the companion, Jot sends note text through its relay to OpenAI. Questions can include excerpts and dates from matching notes. The relay tracks your account, devices, plan and usage. If you subscribe, Stripe collects billing details in its payment form inside Jot. Uninstalling deletes your local notes.
 
 Jot sends a text only after you confirm the person and the words, and your carrier delivers it. Contacts are read on the phone to find who you mean. An alarm, event or message made from a new note doesn't clutter your notes; a reminder stays listed until it fires.
 
@@ -44,7 +43,7 @@ Release builds are signed when `.local/signing.properties` exists; keep that key
 
 ## Test
 
-`testDebugUnitTest` covers parsing, time handling and the companion's rules on the JVM. Device tests run the bundled speech models, draft recovery, reminder saving and, when the companion model is on the device, the companion itself:
+`testDebugUnitTest` covers parsing, time handling and the companion's rules on the JVM. Device tests cover the bundled speech models, draft recovery and reminder saving.
 
 ```sh
 ./gradlew :app:connectedDebugAndroidTest
@@ -52,7 +51,7 @@ Release builds are signed when `.local/signing.properties` exists; keep that key
 
 ## Limits
 
-Verified on an Android 16 emulator with recorded and synthesized speech. Wake sensitivity on your voice, background limits, battery use and GPU speed still need real phones.
+Verified on an Android 16 emulator with recorded and synthesized speech. Wake sensitivity on your voice, background limits and battery use still need real phones.
 
 ## License
 
